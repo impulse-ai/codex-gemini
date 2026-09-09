@@ -1,4 +1,5 @@
 {
+  "workspace": "/absolute/path/codex-gemini",
   "title": "Concurrent scheduler design",
   "objective": "Keep ownership and cancellation correct with 30 workers",
   "summary": "Use isolated conversations and explicit write ownership. Treat provider limits independently from local concurrency.",

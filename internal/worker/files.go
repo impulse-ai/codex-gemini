@@ -16,8 +16,9 @@ import (
 const maxFile = 256 * 1024
 
 type Files struct {
-	root *os.Root
-	mu   sync.Mutex
+	root           *os.Root
+	mu             sync.Mutex
+	protectedRoots []string
 }
 
 func cleanPath(p string) (string, error) {
@@ -38,6 +39,9 @@ func (f *Files) validate(p string) (string, error) {
 	p, err := cleanPath(p)
 	if err != nil {
 		return "", err
+	}
+	if owns(f.protectedRoots, filepath.Join(f.root.Name(), p)) {
+		return "", fmt.Errorf("service state is protected")
 	}
 	cur := ""
 	for _, part := range strings.Split(p, string(filepath.Separator)) {
@@ -107,7 +111,8 @@ func (f *Files) call(name string, args map[string]any, scopes []string) (any, er
 			if e != nil {
 				return e
 			}
-			if _, e = cleanPath(path); e != nil {
+			_, e = cleanPath(path)
+			if e != nil || owns(f.protectedRoots, filepath.Join(f.root.Name(), path)) {
 				if d.IsDir() {
 					return fs.SkipDir
 				}

@@ -12,6 +12,7 @@ import (
 
 // ContextPacket transfers explicit working knowledge, not private reasoning or a transcript.
 type ContextPacket struct {
+	Workspace     string            `json:"workspace,omitempty" jsonschema:"Absolute source workspace for artifact references; workers set this automatically"`
 	Title         string            `json:"title"`
 	Objective     string            `json:"objective"`
 	Summary       string            `json:"summary"`
@@ -81,6 +82,7 @@ type HandoffInput struct {
 	Task    Task     `json:"task" jsonschema:"New bounded assignment; write permissions must be explicitly assigned"`
 }
 type Peer struct {
+	Workspace  string   `json:"workspace"`
 	ID         string   `json:"id"`
 	Label      string   `json:"label,omitempty"`
 	Status     string   `json:"status"`
@@ -125,6 +127,25 @@ func (m *Manager) Publish(author string, p ContextPacket) (SavedContext, error) 
 		if len(m.jobs[author].ContextIDs) >= 8 {
 			return SavedContext{}, fmt.Errorf("job publication limit is 8 context packets; consolidate findings before publishing")
 		}
+		p.Workspace = m.jobs[author].Task.Workspace
+	}
+	if p.Workspace == "" {
+		p.Workspace = m.cfg.Workspace
+	}
+	var files *Files
+	if p.Workspace != "" {
+		if !filepath.IsAbs(p.Workspace) {
+			return SavedContext{}, fmt.Errorf("context workspace must be absolute")
+		}
+		var err error
+		files, err = m.filesLocked(p.Workspace)
+		if err != nil {
+			return SavedContext{}, err
+		}
+		p.Workspace = files.root.Name()
+	}
+	if len(p.Artifacts) > 0 && files == nil {
+		return SavedContext{}, fmt.Errorf("workspace is required for artifact references")
 	}
 	if strings.TrimSpace(p.Title) == "" || len(p.Title) > 200 || strings.TrimSpace(p.Summary) == "" {
 		return SavedContext{}, fmt.Errorf("context requires title (1–200 bytes) and summary")
@@ -141,7 +162,7 @@ func (m *Manager) Publish(author string, p ContextPacket) (SavedContext, error) 
 		return SavedContext{}, err
 	}
 	for i, a := range p.Artifacts {
-		path, err := m.files.validate(a.Path)
+		path, err := files.validate(a.Path)
 		if err != nil {
 			return SavedContext{}, err
 		}
@@ -229,6 +250,8 @@ func (m *Manager) Send(from string, in SendInput) (Message, error) {
 }
 
 type UsageReport struct {
+	Workspaces    map[string]int   `json:"jobs_by_workspace"`
+	StateDir      string           `json:"state_dir"`
 	Model         string           `json:"configured_model"`
 	Concurrency   int              `json:"concurrency"`
 	Jobs          int              `json:"jobs"`
@@ -239,8 +262,9 @@ type UsageReport struct {
 func (m *Manager) UsageReport() UsageReport {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := UsageReport{Model: m.cfg.Model, Concurrency: m.cfg.Concurrency, Jobs: len(m.jobs), Statuses: map[string]int{}, TokensByModel: map[string]Usage{}}
+	out := UsageReport{StateDir: m.state, Workspaces: map[string]int{}, Model: m.cfg.Model, Concurrency: m.cfg.Concurrency, Jobs: len(m.jobs), Statuses: map[string]int{}, TokensByModel: map[string]Usage{}}
 	for _, j := range m.jobs {
+		out.Workspaces[j.Task.Workspace]++
 		out.Statuses[j.Status]++
 		u := out.TokensByModel[j.Model]
 		u.Input += j.Usage.Input
@@ -284,7 +308,7 @@ func (m *Manager) Peers() []Peer {
 	out := []Peer{}
 	for _, j := range m.jobs {
 		if active(j.Status) {
-			out = append(out, Peer{ID: j.ID, Label: j.Task.Label, Status: j.Status, WritePaths: append([]string(nil), j.Task.WritePaths...)})
+			out = append(out, Peer{Workspace: j.Task.Workspace, ID: j.ID, Label: j.Task.Label, Status: j.Status, WritePaths: append([]string(nil), j.Task.WritePaths...)})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -300,6 +324,7 @@ func (m *Manager) Handoff(in HandoffInput) (Job, error) {
 		return Job{}, fmt.Errorf("handoff requires 1–8 source jobs")
 	}
 	type source struct {
+		Workspace  string   `json:"workspace"`
 		ID         string   `json:"id"`
 		Status     string   `json:"status"`
 		Result     string   `json:"result"`
@@ -325,7 +350,7 @@ func (m *Manager) Handoff(in HandoffInput) (Job, error) {
 		if active(j.Status) {
 			return Job{}, fmt.Errorf("source %s is still active", id)
 		}
-		sources = append(sources, source{ID: j.ID, Status: j.Status, Result: j.Result, Error: j.Error, Changed: j.Changed, ContextIDs: j.ContextIDs})
+		sources = append(sources, source{Workspace: j.Task.Workspace, ID: j.ID, Status: j.Status, Result: j.Result, Error: j.Error, Changed: j.Changed, ContextIDs: j.ContextIDs})
 		for _, cid := range j.Task.ContextIDs {
 			add(cid)
 		}
@@ -373,6 +398,17 @@ func (m *Manager) workerCall(jobID, name string, args map[string]any, scopes []s
 		}
 		return out.Receipt(), nil
 	default:
-		return m.files.call(name, args, scopes)
+		m.mu.Lock()
+		job, ok := m.jobs[jobID]
+		if !ok {
+			m.mu.Unlock()
+			return nil, fmt.Errorf("unknown worker")
+		}
+		f, err := m.filesLocked(job.Task.Workspace)
+		m.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		return f.call(name, args, scopes)
 	}
 }

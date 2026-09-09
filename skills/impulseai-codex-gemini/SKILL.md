@@ -5,7 +5,7 @@ description: Delegate bounded reasoning, reviews, and file edits to Gemini worke
 
 # Gemini worker delegation
 
-Use the registered `impulseai-codex-gemini` MCP server's `gemini_*` tools. These workers are independent Gemini conversations, not Codex sidebar tasks. The server is bound to one configured workspace; confirm its workspace before delegating edits. If tools are unavailable, check the registration with `codex mcp get impulseai-codex-gemini`. Authentication uses `codex-gemini auth` in a local terminal or an API-key environment variable. Never request a key in chat. Reload MCP connections after setup.
+Use the registered `impulseai-codex-gemini` MCP server's `gemini_*` tools. These workers are independent Gemini conversations, not Codex sidebar tasks. One shared service works across repositories and Codex sessions. Always pass the current task's absolute repository root in `workspace` when spawning, batching, or handing off. Never use the server's installation directory as the task workspace. Repositories require no registration changes. If tools are unavailable, search the available/deferred tool catalog for `gemini_spawn` or `gemini_usage`, then check `codex mcp get impulseai-codex-gemini`. Authentication uses `codex-gemini auth` in a local terminal or an API-key environment variable. Never request a key in chat. Reload MCP connections after initial setup or a tool-schema upgrade.
 
 ## Spend inference where it helps
 
@@ -15,13 +15,13 @@ Use `gemini_usage` to inspect cumulative token counts without retrieving every j
 
 ## Transfer technical context explicitly
 
-For work spanning phases or advanced topics, publish a brief with `gemini_publish_context` and pass its ID in each task's `context_ids`. Preserve the objective, invariants, exact technical terms, decisions with short reasons, evidence and verification status, file references, unresolved questions, and next steps. Include hashes from `read_file` when artifact freshness matters. Do not claim a test passed unless it ran. Packets contain explicit working knowledge; they do not transfer implicit model state.
+For work spanning phases or advanced topics, publish a brief with `gemini_publish_context` and pass its ID in each task's `context_ids`. Include the source `workspace` when publishing file references from Codex; workers set it automatically. Packets can transfer across repositories while retaining their source identity, without granting access to files outside a job's workspace. Preserve the objective, invariants, exact technical terms, decisions with short reasons, evidence and verification status, file references, unresolved questions, and next steps. Include hashes from `read_file` when artifact freshness matters. Do not claim a test passed unless it ran. Packets contain explicit working knowledge; they do not transfer implicit model state.
 
 Packets are immutable and limited to 32 KiB; tasks can load eight. Favor file references and compact findings over source dumps. Publication returns a small receipt. Read the full packet with `gemini_read_context` only when needed.
 
 ## Assign and coordinate
 
-Use `gemini_spawn` or `gemini_batch` with a concrete `prompt`, a useful role `label`, and disjoint `write_paths`. Omit `write_paths` for read-only analysis. Directories reserve their whole subtree. Avoid assigning `.` when parallel editors need separate files. Share interfaces and constraints before concurrent implementation.
+Use `gemini_spawn` or `gemini_batch` with an absolute `workspace`, concrete `prompt`, useful role `label`, and disjoint `write_paths`. Omit `write_paths` for read-only analysis. Each task in a batch can target a different repository. Reservations compare real absolute paths across all sessions, including nested roots and aliases. Directories reserve their whole subtree. Avoid assigning `.` when parallel editors need separate files. Share interfaces and constraints before concurrent implementation.
 
 Set task `thinking` to `low` for straightforward transformations; use `medium` or `high` when technical uncertainty or reasoning difficulty justifies it. Ask complex workers to publish their findings before finishing.
 
@@ -31,6 +31,6 @@ Workers discover active peers with `list_peers` and communicate through `send_me
 
 Use `gemini_wait` for bounded waits and `gemini_status` for results, changed paths, and published context IDs. `gemini_inbox` is a cursor-based, non-consuming read; late messages can remain after a worker finishes. Status responses omit original prompts and conversation history to reduce repeated output.
 
-Use `gemini_handoff` to start a fresh conversation from stopped jobs' explicit reports and initial/published context IDs. Assign new write scopes explicitly. Unpublished discoveries, inbox messages, and transcripts are not transferred: preserve necessary findings in a packet before handing off. Oversized transfers are rejected; consolidate deliberately instead of silently dropping constraints. Use `gemini_continue` on completed workers when their full existing conversation is needed.
+Use `gemini_handoff` to start a fresh conversation from stopped jobs' explicit reports and initial/published context IDs. Assign the destination `workspace` and new write scopes explicitly. Unpublished discoveries, inbox messages, and transcripts are not transferred: preserve necessary findings in a packet before handing off. Oversized transfers are rejected; consolidate deliberately instead of silently dropping constraints. Use `gemini_continue` on completed workers when their full existing conversation is needed; it keeps the original workspace.
 
-Workers can inspect and create/replace files; they cannot run shell commands. Codex runs appropriate tests and reviews the actual changes. Cancellation leaves edits in place. Failed or interrupted jobs need a fresh assignment, with partial edits reviewed first. One process owns each workspace; standalone CLI runs cannot share a workspace with an active MCP server. Saved jobs and packets survive restarts, but active work does not run after the server exits.
+Workers can inspect and create/replace files; they cannot run shell commands. Codex runs appropriate tests and reviews the actual changes. Cancellation leaves edits in place. Failed or interrupted jobs need a fresh assignment, with partial edits reviewed first. MCP and CLI clients share one service and worker pool. Closing a Codex connection does not cancel jobs. Saved jobs and packets live outside repositories in the user's config directory. `codex-gemini stop` stops the shared service and cancels work across sessions; use it only when stopping that work is intended. Service limits apply at startup; per-task thinking is adjustable without restarting.

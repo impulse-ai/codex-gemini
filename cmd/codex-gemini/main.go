@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/impulseai/codex-gemini/internal/service"
 	"github.com/impulseai/codex-gemini/internal/worker"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"golang.org/x/term"
@@ -96,17 +97,22 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: codex-gemini <serve|run|batch|doctor|auth> [flags]; use <command> -h")
+		return fmt.Errorf("usage: codex-gemini <serve|run|batch|doctor|auth|daemon|stop> [flags]; use <command> -h")
 	}
 	command := os.Args[1]
 	if command == "auth" {
 		return auth()
 	}
-	if command != "serve" && command != "run" && command != "batch" && command != "doctor" {
+	if command != "serve" && command != "run" && command != "batch" && command != "doctor" && command != "daemon" && command != "stop" {
 		return fmt.Errorf("unknown command %q", command)
 	}
 	flags := flag.NewFlagSet(command, flag.ContinueOnError)
 	workspace := flags.String("workspace", ".", "Workspace root")
+	defaultState, err := defaultStateDir()
+	if err != nil {
+		return err
+	}
+	stateDir := flags.String("state-dir", defaultState, "Shared service state directory (all clients must use the same value)")
 	model := flags.String("model", "gemini-3.8-flash", "Exact Google model ID (no fallback)")
 	parallel := flags.Int("concurrency", 30, "Maximum simultaneous agents, 1–30")
 	rpm := flags.Int("rpm", 60, "Global requests per minute; tune to your Google project quota")
@@ -132,17 +138,34 @@ func run() error {
 	if *rpm < 1 || *output < 1 || *output > 65536 {
 		return fmt.Errorf("rpm must be positive; max-output must be 1–65536")
 	}
-	key, err := loadKey()
-	if err != nil {
-		return err
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: key, Backend: genai.BackendGeminiAPI})
+	state, err := filepath.Abs(*stateDir)
 	if err != nil {
 		return err
 	}
-	if command == "doctor" {
+	if command == "stop" {
+		return service.Stop(ctx, state)
+	}
+	if command == "daemon" || command == "doctor" {
+		key, err := loadKey()
+		if err != nil {
+			return err
+		}
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: key, Backend: genai.BackendGeminiAPI})
+		if err != nil {
+			return err
+		}
+		if command == "daemon" {
+			cfg := worker.Config{StateDir: state, Model: *model, Concurrency: *parallel, MaxSteps: *steps, MaxTokens: *tokens, MaxOutput: int32(*output), Timeout: *timeout, Thinking: *thinking}
+			generator := &worker.Gemini{Client: client, Model: *model, Limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(*rpm)), 1)}
+			manager, err := worker.New(ctx, cfg, generator)
+			if err != nil {
+				return err
+			}
+			defer manager.Close()
+			return service.Serve(ctx, state, manager)
+		}
 		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		defer cancel()
 		info, err := client.Models.Get(ctx, *model, nil)
@@ -151,15 +174,13 @@ func run() error {
 		}
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "model": info.Name, "message": "API authentication and model lookup succeeded; generation quota still applies."})
 	}
-	cfg := worker.Config{Workspace: *workspace, Model: *model, Concurrency: *parallel, MaxSteps: *steps, MaxTokens: *tokens, MaxOutput: int32(*output), Timeout: *timeout, Thinking: *thinking}
-	generator := &worker.Gemini{Client: client, Model: *model, Limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(*rpm)), 1)}
-	manager, err := worker.New(ctx, cfg, generator)
-	if err != nil {
-		return err
-	}
-	defer manager.Close()
+	serviceArgs := []string{"-state-dir", state, "-model", *model, "-concurrency", fmt.Sprint(*parallel), "-rpm", fmt.Sprint(*rpm), "-max-steps", fmt.Sprint(*steps), "-max-tokens", fmt.Sprint(*tokens), "-max-output", fmt.Sprint(*output), "-timeout", timeout.String(), "-thinking", *thinking}
 	if command == "serve" {
-		return worker.Server(manager).Run(ctx, &mcp.StdioTransport{})
+		conn, err := connectService(ctx, state, serviceArgs)
+		if err != nil {
+			return err
+		}
+		return proxyStdio(ctx, conn)
 	}
 	var tasks []worker.Task
 	if command == "run" {
@@ -170,7 +191,7 @@ func run() error {
 			}
 			*prompt = string(b)
 		}
-		t := worker.Task{Prompt: *prompt, Label: *label}
+		t := worker.Task{Prompt: *prompt, Label: *label, Thinking: *thinking}
 		if *contextIDs != "" {
 			for _, id := range strings.Split(*contextIDs, ",") {
 				t.ContextIDs = append(t.ContextIDs, strings.TrimSpace(id))
@@ -202,15 +223,57 @@ func run() error {
 			return fmt.Errorf("expected exactly one JSON task array")
 		}
 	}
-	jobs, err := manager.Spawn(tasks)
+	abs, err := filepath.Abs(*workspace)
 	if err != nil {
 		return err
 	}
+	for i := range tasks {
+		if tasks[i].Workspace == "" {
+			tasks[i].Workspace = abs
+		}
+	}
+	conn, err := connectService(ctx, state, serviceArgs)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.3.0"}, nil)
+	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
+	if err != nil {
+		return err
+	}
+	defer session.Close()
+	call := func(name string, args, out any) error {
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+		if err != nil {
+			return err
+		}
+		if res.IsError {
+			return fmt.Errorf("%s: %v", name, res.Content)
+		}
+		b, err := json.Marshal(res.StructuredContent)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(b, out)
+	}
+	var batch worker.JobsOutput
+	if err = call("gemini_batch", worker.BatchInput{Tasks: tasks}, &batch); err != nil {
+		return err
+	}
+	jobs := batch.Jobs
+	// Explicit CLI interruption cancels its jobs. Merely closing an MCP connection does not.
+	defer func() {
+		if ctx.Err() == nil {
+			return
+		}
+		cancelCLIJobs(state, jobs)
+	}()
 	failed := false
 	for _, j := range jobs {
 		for {
-			result, err := manager.Wait(ctx, j.ID, 50*time.Second)
-			if err != nil {
+			var result worker.Job
+			if err := call("gemini_wait", worker.WaitInput{ID: j.ID, Seconds: 50}, &result); err != nil {
 				return err
 			}
 			if result.Status == "queued" || result.Status == "running" {
