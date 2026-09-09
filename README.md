@@ -55,6 +55,28 @@ ln -s "$PWD/skills/impulseai-codex-gemini" "${CODEX_HOME:-$HOME/.codex}/skills/i
 
 If the destination already exists, inspect it before replacing it. Reload skills or start a new session, then invoke `$impulseai-codex-gemini`. The skill supports automatic discovery for relevant Gemini delegation requests. Its guidance complements the MCP server's own tool instructions.
 
+## Implementation, investigation, and independent review
+
+Use Gemini workers for **implementation, investigation, and independent review**, including workers that edit files. Codex keeps responsibility for integration, running tests, and final review.
+
+Useful assignments for Ordinant include:
+
+- **Trace bugs:** follow a web action through the API, service, store, and runtime; return evidence and likely causes.
+- **Implement separate pieces concurrently:** assign backend, frontend, and documentation changes with explicit interfaces and separate file ownership.
+- **Audit boundaries:** inspect tenant isolation, authorization, task leases, idempotency, or bounded retries.
+- **Write regression tests:** construct cases around a confirmed failure, then have Codex run and validate them.
+- **Check deployment compatibility:** review local, BYOC, and hosted paths for assumptions that break another environment.
+- **Compare architecture options:** evaluate competing designs against the same constraints.
+- **Reconcile docs and code:** identify contract drift and update canonical handbook pages.
+- **Coordinate across repositories:** investigate a producer and consumer separately, sharing concise technical findings through context packets.
+- **Carry investigations between phases:** preserve findings in context packets, then hand off from investigation to implementation to review.
+
+For example, ask Codex: “Have Gemini inspect completion certification and retry handling independently, then implement fixes for confirmed issues.”
+
+Workers can read, search, and edit files, but **cannot run shell commands**. Editing requires explicit `write_paths`; concurrent editors need separate ownership. Run independent reviews against the resulting changes after editors finish. Each cross-repository task supplies its own absolute `workspace`.
+
+Work uses Gemini API quota. Worker concurrency and reasoning/token budgets are bounded; use only as many workers as independent assignments warrant. Autopilot preserves progress and recovers within the original run limits, but does not guarantee completion or validate its own claims with executed tests.
+
 ## Delegate work
 
 Ask Codex: “Use Gemini workers to handle these independent changes. Assign disjoint files, inspect their results, then run the tests.”
