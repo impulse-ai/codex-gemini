@@ -1,6 +1,6 @@
-# impulseai/codex-gemini
+# impulse-ai/codex-gemini
 
-Go module: `github.com/impulseai/codex-gemini`. Binary: `codex-gemini`. MCP server identity: `impulseai/codex-gemini`.
+Go module: `github.com/impulse-ai/codex-gemini`. Binary: `codex-gemini`. MCP server identity: `impulse-ai/codex-gemini`.
 
 A small Go CLI and stdio MCP server that lets Codex delegate work to **Gemini 3.8 Flash** on your Google AI Studio API account. Multiple Codex sessions and repositories share up to **30 concurrent Gemini conversations**, each with its own workspace, tool loop, and optional file-editing scope.
 
@@ -11,7 +11,7 @@ Gemini workers do the delegated reasoning and editing. Codex supplies assignment
 Requires Go 1.27 and macOS or Linux.
 
 ```sh
-gh repo clone impulseai/codex-gemini
+gh repo clone impulse-ai/codex-gemini
 cd codex-gemini
 go build -o bin/codex-gemini ./cmd/codex-gemini
 ./bin/codex-gemini auth
@@ -42,7 +42,7 @@ args = ["serve", "-concurrency", "30", "-rpm", "60"]
 env_vars = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 ```
 
-The saved key works even when the desktop app does not inherit your shell environment.
+The saved key works even when the desktop app does not inherit your shell environment. The local registration and skill name remains `impulseai-codex-gemini` for compatibility; the GitHub repository is `impulse-ai/codex-gemini`.
 
 ## Codex skill
 

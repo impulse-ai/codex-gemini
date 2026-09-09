@@ -11,7 +11,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/impulseai/codex-gemini/internal/worker"
+	"github.com/impulse-ai/codex-gemini/internal/worker"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 

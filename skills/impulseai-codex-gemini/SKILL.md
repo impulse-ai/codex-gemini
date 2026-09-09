@@ -1,6 +1,6 @@
 ---
 name: impulseai-codex-gemini
-description: Delegate bounded reasoning, reviews, and file edits to Gemini workers through the impulseai/codex-gemini MCP server. Use for Gemini offloading, parallel worker assignments, technical context handoffs, or local peer coordination.
+description: Delegate bounded reasoning, reviews, and file edits to Gemini workers through the impulse-ai/codex-gemini MCP server. Use for Gemini offloading, parallel worker assignments, technical context handoffs, or local peer coordination.
 ---
 
 # Gemini worker delegation

@@ -1,4 +1,4 @@
-module github.com/impulseai/codex-gemini
+module github.com/impulse-ai/codex-gemini
 
 go 1.27.0
 

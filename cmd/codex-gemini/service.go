@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/impulseai/codex-gemini/internal/service"
-	"github.com/impulseai/codex-gemini/internal/worker"
+	"github.com/impulse-ai/codex-gemini/internal/service"
+	"github.com/impulse-ai/codex-gemini/internal/worker"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
