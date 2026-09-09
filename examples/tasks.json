@@ -1,0 +1,5 @@
+[
+  {"prompt": "Inspect this repository and report three concrete correctness risks. Do not edit files."},
+  {"prompt": "Review README.md against the implementation and fix inaccurate usage instructions.", "write_paths": ["README.md"]},
+  {"prompt": "Inspect the repository and write a concise architecture overview in docs/architecture.md. Do not claim tests were run.", "write_paths": ["docs/architecture.md"]}
+]

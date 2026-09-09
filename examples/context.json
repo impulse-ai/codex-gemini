@@ -1,0 +1,12 @@
+{
+  "title": "Concurrent scheduler design",
+  "objective": "Keep ownership and cancellation correct with 30 workers",
+  "summary": "Use isolated conversations and explicit write ownership. Treat provider limits independently from local concurrency.",
+  "constraints": ["No overlapping write reservations", "Preserve tool call IDs and thought signatures"],
+  "decisions": [{"choice": "Carry explicit context packets between phases", "reason": "Avoid repeatedly transferring full transcripts"}],
+  "evidence": [{"claim": "Local concurrency tests cover 30 workers", "source": "internal/worker/worker_test.go:TestThirtyConcurrentWorkers", "verified": false}],
+  "artifacts": [{"path": "internal/worker/manager.go", "note": "Read the current implementation before proposing changes"}],
+  "open_questions": ["Confirm Google account request and token quotas"],
+  "next_steps": ["Run targeted tests", "Publish verified findings"],
+  "glossary": {"handoff": "A new worker conversation seeded with explicit prior results and context"}
+}

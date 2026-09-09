@@ -1,0 +1,5 @@
+/bin/
+/.gemini-workers/
+.env
+.env.*
+*.test
