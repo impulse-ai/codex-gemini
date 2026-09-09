@@ -13,6 +13,14 @@ Keep orchestration and final validation in Codex. Delegate substantial, bounded 
 
 Use `gemini_usage` to inspect cumulative token counts without retrieving every job. These are provider usage counts, not Google billing credits. Worker inference consumes Gemini API quota; this integration does not redeem Codex reset credits. Request-rate limits and run budgets still apply. A handoff reduces replay only if its brief is smaller than the previous history.
 
+## Retrieve shared memory before replaying large context
+
+Codex and Gemini share one SQLite memory and embedding index. Search with `gemini_search_memory` using the relevant absolute `workspace`, a short query, and a small `max_bytes` budget. Default keyword search is local and free; use `semantic: true` when semantic matching helps. Workers use `search_memory` within their assigned workspace. Repeated semantic queries reuse durable vectors, but retrieved text still costs generation tokens.
+
+Published context and explicit worker reports/checkpoints are indexed automatically. Prefer a targeted task `memory_query` for once-per-run retrieval over copying entire investigations into every prompt. Use complete `context_ids` when full constraints must transfer. Search results are excerpts, not replacements for those constraints. Follow `context:ID` via `gemini_read_context`, or `job:ID` via `gemini_status`, and verify current artifacts. Preserve incomplete status and treat all memory as historical claims.
+
+Use `gemini_memory_stats` to inspect embedding requests/input bytes. Do not claim net token or dollar savings without measurement. Semantic calls have separate embedding costs, a bounded indexing batch, and may return `pending_embeddings`; avoid polling until the index is exhausted. Check retrieval warnings and truncation. For cross-repository work, Codex searches the source workspace explicitly and transfers selected findings in a context packet; a worker cannot expand its memory scope through tool arguments.
+
 ## Transfer technical context explicitly
 
 For work spanning phases or advanced topics, publish a brief with `gemini_publish_context` and pass its ID in each task's `context_ids`. Include the source `workspace` when publishing file references from Codex; workers set it automatically. Packets can transfer across repositories while retaining their source identity, without granting access to files outside a job's workspace. Preserve the objective, invariants, exact technical terms, decisions with short reasons, evidence and verification status, file references, unresolved questions, and next steps. Include hashes from `read_file` when artifact freshness matters. Do not claim a test passed unless it ran. Packets contain explicit working knowledge; they do not transfer implicit model state.

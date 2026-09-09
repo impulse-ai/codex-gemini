@@ -14,30 +14,33 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/impulse-ai/codex-gemini/internal/memory"
 	"google.golang.org/genai"
 )
 
 type Config struct {
-	Workspace   string
-	StateDir    string
-	Model       string
-	Concurrency int
-	MaxSteps    int
-	MaxTokens   int64
-	MaxOutput   int32
-	Timeout     time.Duration
-	Thinking    string
+	EmbeddingModel string
+	Workspace      string
+	StateDir       string
+	Model          string
+	Concurrency    int
+	MaxSteps       int
+	MaxTokens      int64
+	MaxOutput      int32
+	Timeout        time.Duration
+	Thinking       string
 }
 type Task struct {
-	Autopilot  *bool    `json:"autopilot,omitempty" jsonschema:"Default true: checkpoint and compact unfinished work within the original token, step, and time budgets"`
-	MaxTokens  int64    `json:"max_tokens,omitempty" jsonschema:"Optional per-run soft token budget, capped by the service maximum"`
-	FocusPaths []string `json:"focus_paths,omitempty" jsonschema:"Optional relative files or directories to prioritize; guidance, not additional permissions"`
-	Workspace  string   `json:"workspace,omitempty" jsonschema:"Absolute repository root for this task. Required by the shared MCP server; never infer it from the server installation path."`
-	Label      string   `json:"label,omitempty" jsonschema:"Short role or topic label for peer discovery"`
-	ContextIDs []string `json:"context_ids,omitempty" jsonschema:"Immutable shared context IDs to load into the new conversation (up to 8)"`
-	Thinking   string   `json:"thinking,omitempty" jsonschema:"Optional low, medium, or high reasoning level; use medium/high for advanced topics"`
-	Prompt     string   `json:"prompt" jsonschema:"Concrete assignment and required context"`
-	WritePaths []string `json:"write_paths,omitempty" jsonschema:"Exclusive relative files or directories this worker may edit; omit for read-only"`
+	MemoryQuery string   `json:"memory_query,omitempty" jsonschema:"Optional targeted memory query to retrieve once at run start (cached semantic retrieval); original context_ids remain fully loaded"`
+	Autopilot   *bool    `json:"autopilot,omitempty" jsonschema:"Default true: checkpoint and compact unfinished work within the original token, step, and time budgets"`
+	MaxTokens   int64    `json:"max_tokens,omitempty" jsonschema:"Optional per-run soft token budget, capped by the service maximum"`
+	FocusPaths  []string `json:"focus_paths,omitempty" jsonschema:"Optional relative files or directories to prioritize; guidance, not additional permissions"`
+	Workspace   string   `json:"workspace,omitempty" jsonschema:"Absolute repository root for this task. Required by the shared MCP server; never infer it from the server installation path."`
+	Label       string   `json:"label,omitempty" jsonschema:"Short role or topic label for peer discovery"`
+	ContextIDs  []string `json:"context_ids,omitempty" jsonschema:"Immutable shared context IDs to load into the new conversation (up to 8)"`
+	Thinking    string   `json:"thinking,omitempty" jsonschema:"Optional low, medium, or high reasoning level; use medium/high for advanced topics"`
+	Prompt      string   `json:"prompt" jsonschema:"Concrete assignment and required context"`
+	WritePaths  []string `json:"write_paths,omitempty" jsonschema:"Exclusive relative files or directories this worker may edit; omit for read-only"`
 }
 type Usage struct {
 	Input    int64 `json:"input"`
@@ -47,6 +50,7 @@ type Usage struct {
 	Total    int64 `json:"total"`
 }
 type Job struct {
+	MemoryError   string      `json:"memory_error,omitempty"`
 	Checkpoint    *Checkpoint `json:"checkpoint,omitempty"`
 	Activity      []Activity  `json:"activity,omitempty"`
 	Compactions   int         `json:"compactions"`
@@ -71,6 +75,7 @@ type Job struct {
 	done          chan struct{}
 }
 type Manager struct {
+	memory *memory.Store
 	cfg    Config
 	gen    Generator
 	files  map[string]*Files
@@ -99,6 +104,9 @@ func New(ctx context.Context, cfg Config, g Generator) (*Manager, error) {
 	}
 	if cfg.Thinking != "low" && cfg.Thinking != "medium" && cfg.Thinking != "high" {
 		return nil, fmt.Errorf("thinking must be low, medium, or high")
+	}
+	if cfg.EmbeddingModel == "" {
+		cfg.EmbeddingModel = "gemini-embedding-001"
 	}
 	var err error
 	if cfg.Workspace != "" {
@@ -179,11 +187,18 @@ func New(ctx context.Context, cfg Config, g Generator) (*Manager, error) {
 		}
 		m.jobs[j.ID] = &j
 	}
+	if err = m.initMemory(); err != nil {
+		m.Close()
+		return nil, err
+	}
 	return m, nil
 }
 func (m *Manager) Close() {
 	m.cancel()
 	m.wg.Wait()
+	if m.memory != nil {
+		m.memory.Close()
+	}
 	for _, f := range m.files {
 		f.root.Close()
 	}
@@ -248,6 +263,9 @@ func snapshot(j *Job, history bool) Job {
 }
 
 func (m *Manager) validateTask(t Task) (Task, error) {
+	if len(t.MemoryQuery) > 2000 {
+		return t, fmt.Errorf("memory_query exceeds 2000 bytes")
+	}
 	if t.Autopilot != nil {
 		enabled := *t.Autopilot
 		t.Autopilot = &enabled
@@ -514,6 +532,7 @@ func (m *Manager) Continue(id, prompt string) (Job, error) {
 	j.Status = "queued"
 	j.Result = ""
 	j.Error = ""
+	j.MemoryError = ""
 	if err := m.save(j); err != nil {
 		*j = old
 		return Job{}, err

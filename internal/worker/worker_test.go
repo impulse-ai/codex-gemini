@@ -278,7 +278,7 @@ func TestMCPRoundTrip(t *testing.T) {
 	}
 	defer cs.Close()
 	list, e := cs.ListTools(ctx, nil)
-	if e != nil || len(list.Tools) != 13 {
+	if e != nil || len(list.Tools) != 15 {
 		t.Fatalf("tools %v %v", list, e)
 	}
 	result, e := cs.CallTool(ctx, &mcp.CallToolParams{Name: "gemini_spawn", Arguments: map[string]any{"prompt": "test"}})

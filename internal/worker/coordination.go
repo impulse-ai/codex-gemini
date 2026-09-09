@@ -119,7 +119,14 @@ func (m *Manager) ReadContext(id string) (SavedContext, error) {
 }
 func (m *Manager) Publish(author string, p ContextPacket) (SavedContext, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	out, err := m.publishLocked(author, p)
+	m.mu.Unlock()
+	if err == nil && m.memory != nil {
+		err = m.indexContext(out)
+	}
+	return out, err
+}
+func (m *Manager) publishLocked(author string, p ContextPacket) (SavedContext, error) {
 	if author != "codex" {
 		if _, ok := m.jobs[author]; !ok {
 			return SavedContext{}, fmt.Errorf("unknown author")

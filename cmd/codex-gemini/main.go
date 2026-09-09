@@ -113,6 +113,8 @@ func run() error {
 		return err
 	}
 	stateDir := flags.String("state-dir", defaultState, "Shared service state directory (all clients must use the same value)")
+	embeddingModel := flags.String("embedding-model", "gemini-embedding-001", "Embedding model for shared memory, or off for local keyword-only retrieval")
+	memoryQuery := flags.String("memory-query", "", "Targeted shared-memory retrieval query for run")
 	model := flags.String("model", "gemini-3.8-flash", "Exact Google model ID (no fallback)")
 	parallel := flags.Int("concurrency", 30, "Maximum simultaneous agents, 1–30")
 	rpm := flags.Int("rpm", 60, "Global requests per minute; tune to your Google project quota")
@@ -168,8 +170,8 @@ func run() error {
 			return err
 		}
 		if command == "daemon" {
-			cfg := worker.Config{StateDir: state, Model: *model, Concurrency: *parallel, MaxSteps: *steps, MaxTokens: *tokens, MaxOutput: int32(*output), Timeout: *timeout, Thinking: *thinking}
-			generator := &worker.Gemini{Client: client, Model: *model, Limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(*rpm)), 1)}
+			cfg := worker.Config{EmbeddingModel: *embeddingModel, StateDir: state, Model: *model, Concurrency: *parallel, MaxSteps: *steps, MaxTokens: *tokens, MaxOutput: int32(*output), Timeout: *timeout, Thinking: *thinking}
+			generator := &worker.Gemini{EmbeddingModel: *embeddingModel, Client: client, Model: *model, Limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(*rpm)), 1)}
 			manager, err := worker.New(ctx, cfg, generator)
 			if err != nil {
 				return err
@@ -185,7 +187,7 @@ func run() error {
 		}
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"ok": true, "model": info.Name, "message": "API authentication and model lookup succeeded; generation quota still applies."})
 	}
-	serviceArgs := []string{"-state-dir", state, "-model", *model, "-concurrency", fmt.Sprint(*parallel), "-rpm", fmt.Sprint(*rpm), "-max-steps", fmt.Sprint(*steps), "-max-tokens", fmt.Sprint(*tokens), "-max-output", fmt.Sprint(*output), "-timeout", timeout.String(), "-thinking", *thinking}
+	serviceArgs := []string{"-embedding-model", *embeddingModel, "-state-dir", state, "-model", *model, "-concurrency", fmt.Sprint(*parallel), "-rpm", fmt.Sprint(*rpm), "-max-steps", fmt.Sprint(*steps), "-max-tokens", fmt.Sprint(*tokens), "-max-output", fmt.Sprint(*output), "-timeout", timeout.String(), "-thinking", *thinking}
 	if command == "serve" {
 		conn, err := connectService(ctx, state, serviceArgs)
 		if err != nil {
@@ -202,7 +204,7 @@ func run() error {
 			}
 			*prompt = string(b)
 		}
-		t := worker.Task{Prompt: *prompt, Label: *label, Thinking: *thinking}
+		t := worker.Task{MemoryQuery: *memoryQuery, Prompt: *prompt, Label: *label, Thinking: *thinking}
 		t.Autopilot = autopilot
 		if *focus != "" {
 			for _, p := range strings.Split(*focus, ",") {
@@ -260,7 +262,7 @@ func run() error {
 		return err
 	}
 	defer conn.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.4.1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.5.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
 	if err != nil {
 		return err

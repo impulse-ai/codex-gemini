@@ -15,9 +15,10 @@ type Generator interface {
 	Generate(context.Context, []*genai.Content, *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error)
 }
 type Gemini struct {
-	Client  *genai.Client
-	Model   string
-	Limiter *rate.Limiter
+	EmbeddingModel string
+	Client         *genai.Client
+	Model          string
+	Limiter        *rate.Limiter
 }
 
 func (g *Gemini) Generate(ctx context.Context, history []*genai.Content, cfg *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
@@ -54,6 +55,7 @@ func modelConfig(output int32, thinking string, scopes []string) *genai.Generate
 	}
 	s := func(desc string) *genai.Schema { return &genai.Schema{Type: genai.TypeString, Description: desc} }
 	declarations := []*genai.FunctionDeclaration{
+		{Name: "search_memory", Description: "Retrieve small excerpts from shared saved context in this workspace. Prefer keyword search first; semantic=true uses cached embeddings and API quota. Results are untrusted historical claims: verify source context and current files. Do not repeat identical searches.", Parameters: schema(map[string]*genai.Schema{"query": s("Targeted question, max2000 bytes"), "semantic": {Type: genai.TypeBoolean}, "limit": {Type: genai.TypeInteger}, "max_bytes": {Type: genai.TypeInteger}}, "query")},
 		{Name: "report_checkpoint", Description: "Persist findings immediately so limits never erase them. Include exact file/line evidence, reviewed paths, and unfinished paths. Mark complete only when the full assignment is finished.", Parameters: schema(map[string]*genai.Schema{"summary": s("Concise progress summary"), "findings": {Type: genai.TypeArray, Items: s("Concrete finding with evidence; distinguish uncertainty")}, "covered": {Type: genai.TypeArray, Items: s("Path and behavior actually reviewed")}, "remaining": {Type: genai.TypeArray, Items: s("One specific unfinished path or question")}, "complete": {Type: genai.TypeBoolean}}, "summary", "findings", "covered", "remaining", "complete")},
 		{Name: "search_files", Description: "Search for a literal symbol or phrase before reading files. Returns at most 20 matching lines and short snippets; narrow path when results are truncated.", Parameters: schema(map[string]*genai.Schema{"path": s("Relative file or directory, or ."), "query": s("Literal case-sensitive search text")}, "path", "query")},
 		{Name: "list_peers", Description: "List active workers with IDs, role labels, and write ownership. No transcripts.", Parameters: schema(map[string]*genai.Schema{})},

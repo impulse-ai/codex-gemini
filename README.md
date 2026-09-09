@@ -97,6 +97,8 @@ MCP tools:
 | `gemini_send_message` | Send a short message and context references to a worker. |
 | `gemini_inbox` | Read a worker's persisted mailbox with a cursor. |
 | `gemini_handoff` | Start a fresh conversation carrying stopped jobs' reports and context references. |
+| `gemini_search_memory` | Retrieve bounded excerpts from shared SQLite memory; optional cached semantic search. |
+| `gemini_memory_stats` | Inspect memory size and embedding request/input-byte counters. |
 | `gemini_usage` | Read cumulative token usage by model and counts by job status. |
 
 Example `gemini_batch` arguments:
@@ -139,6 +141,40 @@ Recovery is limited to two context compactions per run and shares the original t
 `gemini_status` and `gemini_wait` include `checkpoint`, recent `activity`, and `compactions`. A stopped incomplete job returns saved findings and an explicit coverage gap instead of an empty result. Contradictory synthesized reports with both `complete: true` and remaining work are retained as incomplete. An empty or interrupted review is never evidence that the code is clean. A checkpoint is a saved intermediate report; consult the final status and result for completion. Codex validates findings and runs tests.
 
 Set task `autopilot: false` or CLI `-autopilot=false` to disable automatic synthesis and compaction. Bounded file tools and incremental checkpoint reporting remain available. `max_tokens` optionally lowers a task's run budget; it cannot exceed the service maximum. Explicit handoff or continuation starts a new paid run, so do not blindly relaunch an exhausted review.
+
+## Shared memory for Codex and Gemini
+
+Both platforms use **one local SQLite memory and one embedding space** through MCP. Codex calls `gemini_search_memory`; Gemini workers call `search_memory`. No OpenAI embedding account or second vector index is needed. This expands retrievable knowledge, not either model's native context window.
+
+Published context packets and explicit worker reports/checkpoints are indexed locally, including existing saved archives on startup. Full tool transcripts and model thought parts are not embedded. Indexing itself makes no API calls. Memory lives in `memory.sqlite` beside the existing shared state, with owner-only file permissions and SQLite WAL persistence. It stores vectors as blobs and computes bounded cosine ranking in Go using a pure-Go SQLite driver; it does not require a native vector extension or a separate database server.
+
+Start with a **free local keyword search**:
+
+```json
+{
+  "workspace": "/absolute/path/repository",
+  "query": "browser handback admission barrier",
+  "limit": 3,
+  "max_bytes": 4000
+}
+```
+
+Pass these arguments to `gemini_search_memory`. Set `semantic: true` for hybrid keyword/vector retrieval when wording differs. Source references are `context:ID` or `job:ID`: use the ID with `gemini_read_context` or `gemini_status` for the full record. Each hit includes its source workspace and chunk number. Codex can explicitly search another repository; a worker's search is fixed to its own workspace. Carry selected findings across repositories through an explicit context packet.
+
+For automatic retrieval at the start of a worker run, set task `memory_query` to a short, targeted question (or CLI `-memory-query`). The worker gets up to four excerpts totaling 6,000 text bytes. Retrieval runs once per run and participates in normal generation-input budgeting. Without `memory_query`, no startup semantic search occurs; workers can search as needed. Explicit `context_ids` still load complete packets, preserving their full constraints.
+
+Cost controls:
+
+- Default semantic model: `gemini-embedding-001`, 768 dimensions, shared by both platforms. `-embedding-model off` disables remote embedding calls; keyword retrieval remains available. This is a service-startup setting.
+- Document chunks and queries are cached by model, task type, and content hash. Unchanged text is embedded once, including across restarts and concurrent clients. Repeated queries reuse their vectors; no LLM reranking or summarization is used for search.
+- Each semantic search embeds at most 16 missing document chunks of up to 1,800 UTF-8 bytes, plus one query of up to 2,000 bytes. `pending_embeddings` exposes any remaining backlog. Later searches index additional chunks within the same bound.
+- Default results: four excerpts / 6,000 text bytes; maximum eight / 12,000. Provenance metadata is additional. Exact duplicate excerpts are suppressed and weak semantic matches are filtered relative to the best result.
+- Searches inspect at most the newest 5,000 chunks in the selected workspace. `truncated` reports scan/output limits; results are not an exhaustive nearest-neighbor index at larger scales.
+- If embeddings fail, retrieval returns available keyword matches with a warning. Embedding requests share the Gemini request-rate limiter, have a 30-second retrieval timeout, and do not automatically retry. Their costs are separate from generation token budgets.
+
+`gemini_memory_stats` reports indexed chunks, cached vectors, attempted embedding requests, and input bytes. The Developer API does not provide embedding billing-token counts through this response, so the service does not invent them or claim a measured net saving. Embedding calls use Google API quota; retrieved excerpts still consume tokens when supplied to Codex or Gemini. Savings depend on replacing larger replayed context with relevant excerpts. See [Google's current embedding pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-embedding).
+
+Memory contains historical model claims, not automatically verified facts. Reports retain their completion status; incomplete findings remain incomplete. Fetch complete constraints and check current files/hashes before editing. Context packets and full reports remain the source records. The index/cache is not automatically pruned; job status exposes `memory_error` for retrieval warnings or if a report could not be indexed.
 
 ## Context transfer and local peer communication
 

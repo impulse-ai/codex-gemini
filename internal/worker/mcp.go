@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"github.com/impulse-ai/codex-gemini/internal/memory"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -26,7 +27,15 @@ type WaitInput struct {
 }
 
 func Server(m *Manager) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "impulse-ai/codex-gemini", Version: "0.4.1"}, &mcp.ServerOptions{Instructions: "This shared service works across repositories and Codex sessions. Always pass the current task's absolute repository root as workspace when spawning, batching, or handing off. Never use the server binary's installation directory as the workspace. Status and usage report workspace identities. File access stays within each job's workspace; write ownership and the worker limit are shared across all sessions. Publish reusable technical context once with its source workspace and pass context_ids to tasks, including across repositories. Use labeled tasks, narrow focus_paths, disjoint write_paths, and low thinking for focused reviews. Autopilot defaults on: paginated reads, saved findings, reserved low-thinking checkpoint generation, and at most two context compactions within the original budget. max_tokens optionally lowers the per-run budget. Check checkpoint.remaining and status: incomplete work is never a clean review. Recovery stops on no progress or exhausted limits; do not blindly relaunch failed reviews. Workers exchange brief messages and context IDs directly. Handoff starts fresh from reports and published context; specify the destination workspace and write_paths. Continue keeps the original workspace and history. Workers cannot execute shell commands; Codex validates changes. Closing a client connection does not stop jobs. Do not send credentials in prompts."})
+	s := mcp.NewServer(&mcp.Implementation{Name: "impulse-ai/codex-gemini", Version: "0.5.0"}, &mcp.ServerOptions{Instructions: "This shared service works across repositories and Codex sessions. Always pass the current task's absolute repository root as workspace when spawning, batching, or handing off. Never use the server binary's installation directory as the workspace. Status and usage report workspace identities. File access stays within each job's workspace; write ownership and the worker limit are shared across all sessions. Use gemini_search_memory for small historical excerpts before replaying large reports; keyword retrieval is free/local, semantic retrieval uses cached embeddings. Optional task memory_query retrieves once at startup. Memory does not replace full constraints or current file verification. Publish reusable technical context once with its source workspace and pass context_ids to tasks, including across repositories. Use labeled tasks, narrow focus_paths, disjoint write_paths, and low thinking for focused reviews. Autopilot defaults on: paginated reads, saved findings, reserved low-thinking checkpoint generation, and at most two context compactions within the original budget. max_tokens optionally lowers the per-run budget. Check checkpoint.remaining and status: incomplete work is never a clean review. Recovery stops on no progress or exhausted limits; do not blindly relaunch failed reviews. Workers exchange brief messages and context IDs directly. Handoff starts fresh from reports and published context; specify the destination workspace and write_paths. Continue keeps the original workspace and history. Workers cannot execute shell commands; Codex validates changes. Closing a client connection does not stop jobs. Do not send credentials in prompts."})
+	mcp.AddTool(s, &mcp.Tool{Name: "gemini_search_memory", Description: "Search shared SQLite context memory with bounded excerpts and provenance. Keyword search is free/local by default; semantic=true uses cached embeddings. Explicit workspace scopes retrieval. Excerpts do not replace complete constraints or current file verification."}, func(ctx context.Context, r *mcp.CallToolRequest, in MemoryInput) (*mcp.CallToolResult, memory.Result, error) {
+		out, err := m.SearchMemory(ctx, in)
+		return nil, out, err
+	})
+	mcp.AddTool(s, &mcp.Tool{Name: "gemini_memory_stats", Description: "Read local memory chunk/vector counts and attempted embedding requests/input bytes. Embedding billing tokens and net savings are not measured."}, func(ctx context.Context, r *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, memory.Stats, error) {
+		out, err := m.memory.Stats()
+		return nil, out, err
+	})
 	mcp.AddTool(s, &mcp.Tool{Name: "gemini_usage", Description: "Read compact cumulative token totals grouped by model and job status counts. Includes saved jobs; does not query Google billing or estimate currency."}, func(ctx context.Context, r *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, UsageReport, error) {
 		return nil, m.UsageReport(), nil
 	})

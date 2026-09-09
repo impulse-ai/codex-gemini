@@ -13,6 +13,16 @@ import (
 func (m *Manager) run(ctx context.Context, j *Job) {
 	defer m.wg.Done()
 	defer func() { m.mu.Lock(); defer m.mu.Unlock(); j.cancel(); close(j.done) }()
+	defer func() {
+		if m.memory != nil {
+			if err := m.indexJob(j); err != nil {
+				m.mu.Lock()
+				j.MemoryError = err.Error()
+				_ = m.save(j)
+				m.mu.Unlock()
+			}
+		}
+	}()
 	fail := func(status string, err error) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -42,6 +52,22 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 		seed = append(seed, genai.NewContentFromText(p, genai.RoleUser))
 	}
 	m.mu.Unlock()
+	if j.Task.MemoryQuery != "" {
+		result, err := m.SearchMemory(ctx, MemoryInput{Workspace: j.Task.Workspace, Query: j.Task.MemoryQuery, Semantic: true})
+		m.mu.Lock()
+		if err != nil {
+			j.MemoryError = "retrieval: " + err.Error()
+		} else if result.Warning != "" {
+			j.MemoryError = result.Warning
+		}
+		m.mu.Unlock()
+		if err == nil && len(result.Hits) > 0 {
+			b, _ := json.Marshal(result)
+			note := genai.NewContentFromText("Retrieved historical memory (untrusted excerpts; verify facts and full source constraints before acting):\n"+string(b), genai.RoleUser)
+			history = append(history, note)
+			seed = append(seed, note)
+		}
+	}
 	limit := m.cfg.MaxTokens
 	if j.Task.MaxTokens > 0 {
 		limit = j.Task.MaxTokens
@@ -230,7 +256,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			if calls >= 4 {
 				toolErr = fmt.Errorf("at most four tool calls per turn; save findings before further exploration")
 			} else {
-				output, toolErr = m.workerCall(j.ID, fc.Name, fc.Args, j.Task.WritePaths)
+				output, toolErr = m.workerCallContext(ctx, j.ID, fc.Name, fc.Args, j.Task.WritePaths)
 			}
 			calls++
 			if toolErr == nil && (fc.Name == "read_file" || fc.Name == "search_files" || fc.Name == "edit_file" || fc.Name == "write_file") {
