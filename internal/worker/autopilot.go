@@ -155,6 +155,42 @@ func recoveryInput(seed []*genai.Content, j *Job) []*genai.Content {
 		text += "\nPartial output, not a completed response:\n" + j.PartialOutput
 	}
 	h = append(h, genai.NewContentFromText(text, genai.RoleUser))
+	// Keep at most two recent file exchanges (12 KiB total), including native
+	// call IDs and thought signatures. Hash checks still reject stale writes.
+	var recent [][]*genai.Content
+	bytes := 0
+	for i := len(j.history) - 1; i > 0 && len(recent) < 2; i-- {
+		result, call := j.history[i], j.history[i-1]
+		if result == nil || call == nil || len(call.Parts) == 0 || len(result.Parts) != len(call.Parts) {
+			continue
+		}
+		valid := true
+		for k, p := range call.Parts {
+			if p == nil || p.FunctionCall == nil || result.Parts[k] == nil || result.Parts[k].FunctionResponse == nil {
+				valid = false
+				break
+			}
+			fc, fr := p.FunctionCall, result.Parts[k].FunctionResponse
+			if (fc.Name != "read_file" && fc.Name != "edit_file" && fc.Name != "write_file") || fc.Name != fr.Name || fc.ID != fr.ID || fr.Response["error"] != nil {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		pair := []*genai.Content{call, result}
+		b, _ := json.Marshal(pair)
+		if bytes+len(b) > 12*1024 {
+			continue
+		}
+		recent = append(recent, pair)
+		bytes += len(b)
+		i--
+	}
+	for i := len(recent) - 1; i >= 0; i-- {
+		h = append(h, recent[i]...)
+	}
 	return h
 }
 
@@ -199,7 +235,16 @@ func (m *Manager) summarize(ctx context.Context, j *Job, history []*genai.Conten
 		m.mu.Unlock()
 		return nil, fmt.Errorf("invalid checkpoint JSON")
 	}
+	// Contradictory completion claims are incomplete, not grounds to discard findings.
+	if len(c.Remaining) > 0 {
+		c.Complete = false
+	}
 	if err = validateCheckpoint(c); err != nil {
+		m.mu.Lock()
+		if text.Len() > 0 {
+			j.PartialOutput = clip(text.String(), 4096)
+		}
+		m.mu.Unlock()
 		return nil, err
 	}
 	return &c, nil

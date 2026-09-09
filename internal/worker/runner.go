@@ -57,6 +57,8 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 	turns, compactions := 0, 0
 	forceSummary := false
 	lastRecovery := ""
+	observations := make(map[string]bool)
+	progress, lastProgress := 0, 0
 	var lastPrompt int64
 	lastBytes := 0
 	for {
@@ -93,7 +95,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 		estimate := promptEstimate(history, cfg, lastPrompt, lastBytes)
 		summaryCfg := summaryConfig(cfg.MaxOutputTokens)
 		summaryCost := promptEstimate(m.summaryInput(j, history), summaryCfg, lastPrompt, lastBytes) + int64(summaryCfg.MaxOutputTokens)
-		summarize := automatic && (forceSummary || turns >= 4 || (turns > 0 && estimate >= 12000) || steps >= m.cfg.MaxSteps-1 || used+estimate+int64(cfg.MaxOutputTokens)+summaryCost > limit || (turns > 0 && remainingTime(ctx) < checkpointReserve))
+		summarize := automatic && (forceSummary || (compactions < 2 && turns > 0 && estimate >= 12000) || steps >= m.cfg.MaxSteps-1 || used+estimate+int64(cfg.MaxOutputTokens)+summaryCost > limit || (turns > 0 && remainingTime(ctx) < checkpointReserve))
 		if summarize {
 			if used+summaryCost > limit {
 				fail("limit_reached", fmt.Errorf("insufficient remaining tokens for a safe checkpoint"))
@@ -125,7 +127,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			}
 			fresh := recoveryInput(seed, j)
 			signature := progressSignature(c)
-			stalled := lastRecovery != "" && lastRecovery == signature
+			stalled := lastRecovery != "" && lastRecovery == signature && progress == lastProgress
 			canContinue := !stalled && len(c.Remaining) > 0 && compactions < 2 && steps+2 <= m.cfg.MaxSteps && used+2*promptEstimate(fresh, cfg, 0, 0)+int64(cfg.MaxOutputTokens)+4096 < limit && remainingTime(ctx) > 2*checkpointReserve
 			if canContinue {
 				err = m.archiveSegment(j, history)
@@ -135,6 +137,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 					j.Compactions++
 					compactions++
 					lastRecovery = signature
+					lastProgress = progress
 					turns = 0
 					forceSummary = false
 					lastPrompt = 0
@@ -230,6 +233,14 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 				output, toolErr = m.workerCall(j.ID, fc.Name, fc.Args, j.Task.WritePaths)
 			}
 			calls++
+			if toolErr == nil && (fc.Name == "read_file" || fc.Name == "search_files" || fc.Name == "edit_file" || fc.Name == "write_file") {
+				b, _ := json.Marshal([]any{fc.Name, fc.Args, output})
+				key := digest(b)
+				if !observations[key] {
+					observations[key] = true
+					progress++
+				}
+			}
 			payload := map[string]any{"output": output}
 			if toolErr != nil {
 				payload = map[string]any{"error": toolErr.Error()}

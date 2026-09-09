@@ -35,8 +35,12 @@ func TestAutopilotCompactsAndFinishesWithinSameJob(t *testing.T) {
 			}
 			return checkpointResponse(Checkpoint{Summary: "Path A reviewed", Findings: []string{"a.go:4 missing guard"}, Covered: []string{"path A"}, Remaining: []string{"path B"}}), nil
 		}
-		if work.Add(1) <= 4 {
-			return listResponse(), nil
+		if n := work.Add(1); n <= 4 {
+			r := listResponse()
+			if n == 4 {
+				r.Candidates[0].FinishReason = genai.FinishReasonMaxTokens
+			}
+			return r, nil
 		}
 		if len(h) != 2 || !strings.Contains(h[0].Parts[0].Text, "preserve invariant") || !strings.Contains(h[1].Parts[0].Text, "a.go:4") {
 			t.Error("fresh conversation lost constraints or findings")
@@ -96,13 +100,17 @@ func TestAutopilotRecoversTruncatedOutputWithoutExecutingCalls(t *testing.T) {
 func TestAutopilotReturnsPartialFindingsAndStopsOnNoProgress(t *testing.T) {
 	cfg := testConfig(t.TempDir())
 	cfg.MaxSteps = 25
-	var summaries atomic.Int32
+	var summaries, work atomic.Int32
 	g := generateFunc(func(ctx context.Context, h []*genai.Content, c *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
 		if c.ResponseMIMEType == "application/json" {
 			summaries.Add(1)
 			return checkpointResponse(Checkpoint{Summary: "Blocked on missing schema", Findings: []string{"a.go:3 unchecked input"}, Covered: []string{"a.go"}, Remaining: []string{"missing generated schema"}}), nil
 		}
-		return listResponse(), nil
+		r := listResponse()
+		if work.Add(1)%4 == 0 {
+			r.Candidates[0].FinishReason = genai.FinishReasonMaxTokens
+		}
+		return r, nil
 	})
 	m := newManager(t, cfg, g)
 	jobs, e := m.Spawn([]Task{{Prompt: "review"}})
@@ -244,5 +252,101 @@ func TestBudgetForecastReservesCheckpointInsteadOfAnotherRead(t *testing.T) {
 	j := awaitJob(t, m, jobs[0].ID)
 	if calls.Load() != 2 || j.Status != "limit_reached" || j.Checkpoint == nil || j.Usage.Total > cfg.MaxTokens || j.Compactions != 0 {
 		t.Fatalf("lost reservation or enlarged budget: %+v", j)
+	}
+}
+
+func TestRecoveryRetainsReadForHashCheckedEdit(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	cfg.MaxSteps = 10
+	if err := os.WriteFile(filepath.Join(cfg.Workspace, "a.txt"), []byte("before"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	g := generateFunc(func(ctx context.Context, h []*genai.Content, c *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		n := calls.Add(1)
+		if c.ResponseMIMEType == "application/json" {
+			return checkpointResponse(Checkpoint{Summary: "Edit a.txt", Remaining: func() []string {
+				if n < 5 {
+					return []string{"edit a.txt"}
+				}
+				return nil
+			}(), Complete: n >= 5}), nil
+		}
+		switch n {
+		case 1:
+			return response(&genai.Part{FunctionCall: &genai.FunctionCall{ID: "read-id", Name: "read_file", Args: map[string]any{"path": "a.txt"}}, ThoughtSignature: []byte("signature")}), nil
+		case 2:
+			r := response(&genai.Part{Text: "prepare edit"})
+			r.Candidates[0].FinishReason = genai.FinishReasonMaxTokens
+			return r, nil
+		case 4:
+			var hash string
+			for _, turn := range h {
+				for _, p := range turn.Parts {
+					if p.FunctionResponse != nil && p.FunctionResponse.ID == "read-id" {
+						out := p.FunctionResponse.Response["output"].(map[string]any)
+						hash, _ = out["sha256"].(string)
+					}
+				}
+			}
+			if hash == "" {
+				t.Error("compaction lost the inspected file and its hash")
+			}
+			return response(&genai.Part{FunctionCall: &genai.FunctionCall{ID: "edit-id", Name: "edit_file", Args: map[string]any{"path": "a.txt", "old_text": "before", "new_text": "after", "expected_sha256": hash}}}), nil
+		default:
+			return response(&genai.Part{Text: "edited"}), nil
+		}
+	})
+	m := newManager(t, cfg, g)
+	jobs, err := m.Spawn([]Task{{Prompt: "Edit a.txt", WritePaths: []string{"a.txt"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := awaitJob(t, m, jobs[0].ID)
+	b, err := os.ReadFile(filepath.Join(cfg.Workspace, "a.txt"))
+	if err != nil || string(b) != "after" || j.Status != "completed" || j.Compactions != 1 {
+		t.Fatalf("lost usable read state: %+v %s %v", j, b, err)
+	}
+}
+
+func TestNewFileEvidenceIsProgressWithUnchangedCheckpoint(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	cfg.MaxSteps = 12
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(cfg.Workspace, name), []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var calls atomic.Int32
+	g := generateFunc(func(ctx context.Context, h []*genai.Content, c *genai.GenerateContentConfig) (*genai.GenerateContentResponse, error) {
+		n := calls.Add(1)
+		if c.ResponseMIMEType == "application/json" {
+			if n >= 8 {
+				return checkpointResponse(Checkpoint{Summary: "review finished", Complete: true}), nil
+			}
+			return checkpointResponse(Checkpoint{Summary: "checking", Remaining: []string{"verify behavior"}}), nil
+		}
+		if n == 1 || n == 4 {
+			name := "a.txt"
+			if n == 4 {
+				name = "b.txt"
+			}
+			return response(&genai.Part{FunctionCall: &genai.FunctionCall{ID: name, Name: "read_file", Args: map[string]any{"path": name}}}), nil
+		}
+		if n == 2 || n == 5 {
+			r := response(&genai.Part{Text: "partial"})
+			r.Candidates[0].FinishReason = genai.FinishReasonMaxTokens
+			return r, nil
+		}
+		return response(&genai.Part{Text: "review finished"}), nil
+	})
+	m := newManager(t, cfg, g)
+	jobs, err := m.Spawn([]Task{{Prompt: "Review both files"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j := awaitJob(t, m, jobs[0].ID)
+	if j.Status != "completed" || j.Compactions != 2 {
+		t.Fatalf("new evidence misclassified as stalled: %+v", j)
 	}
 }

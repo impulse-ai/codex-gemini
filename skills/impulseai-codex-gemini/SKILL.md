@@ -29,7 +29,7 @@ Workers discover active peers with `list_peers` and communicate through `send_me
 
 ## Run reviews with bounded autopilot
 
-Autopilot defaults on. Assign individual code paths with `focus_paths`, concrete questions, and expected file/line evidence. Ask workers to save findings and coverage with `report_checkpoint` as they go. Use paginated `read_file` and targeted `search_files`; use `edit_file` for exact hash-checked replacements that preserve unread content.
+Autopilot defaults on. Assign individual code paths with `focus_paths`, concrete questions, and expected file/line evidence. For edit assignments, state the required file change and acceptance criteria explicitly; ask the worker to implement after targeted inspection, not stop at a plan. Ask workers to save findings and coverage with `report_checkpoint` as they go. Use paginated `read_file` and targeted `search_files`; use `edit_file` for exact hash-checked replacements that preserve unread content.
 
 The server reserves estimated tokens for low-thinking synthesis, recovers truncated output without executing partial tool calls, and can compact context twice within the original token, step, and timeout limits. Original assignments, direct follow-ups, and checkpoints survive compaction; old tool transcripts are archived. This is bounded recovery, not an unlimited retry loop. Task `max_tokens` can lower the service cap; `autopilot: false` opts out of automatic recovery.
 
