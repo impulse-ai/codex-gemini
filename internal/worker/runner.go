@@ -118,6 +118,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			fail("limit_reached", fmt.Errorf("run budget reached"))
 			return
 		}
+		cfg.MaxOutputTokens = min(m.cfg.MaxOutput, int32(max(int64(256), (limit-used)/8)))
 		estimate := promptEstimate(history, cfg, lastPrompt, lastBytes)
 		summaryCfg := summaryConfig(cfg.MaxOutputTokens)
 		summaryCost := promptEstimate(m.summaryInput(j, history), summaryCfg, lastPrompt, lastBytes) + int64(summaryCfg.MaxOutputTokens)
@@ -154,7 +155,8 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			fresh := recoveryInput(seed, j)
 			signature := progressSignature(c)
 			stalled := lastRecovery != "" && lastRecovery == signature && progress == lastProgress
-			canContinue := !stalled && len(c.Remaining) > 0 && compactions < 2 && steps+2 <= m.cfg.MaxSteps && used+2*promptEstimate(fresh, cfg, 0, 0)+int64(cfg.MaxOutputTokens)+4096 < limit && remainingTime(ctx) > 2*checkpointReserve
+			recoveryCost := 2*promptEstimate(fresh, cfg, lastPrompt, lastBytes) + int64(cfg.MaxOutputTokens) + int64(summaryCfg.MaxOutputTokens)
+			canContinue := !stalled && len(c.Remaining) > 0 && compactions < 2 && steps+2 <= m.cfg.MaxSteps && used+recoveryCost < limit && remainingTime(ctx) > 2*checkpointReserve
 			if canContinue {
 				err = m.archiveSegment(j, history)
 				if err == nil {
@@ -179,9 +181,18 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 				return
 			}
 			if !canContinue {
-				reason := "checkpoint saved; bounded recovery budget exhausted"
-				if stalled {
+				reason := "checkpoint saved; no actionable remaining work"
+				switch {
+				case stalled:
 					reason = "checkpoint saved; no progress since previous recovery"
+				case steps+2 > m.cfg.MaxSteps:
+					reason = fmt.Sprintf("checkpoint saved; model-call limit (%d/%d used; recovery needs two calls)", steps, m.cfg.MaxSteps)
+				case used+recoveryCost >= limit:
+					reason = fmt.Sprintf("checkpoint saved; token reservation (%d/%d used; next work plus checkpoint estimated %d)", used, limit, recoveryCost)
+				case remainingTime(ctx) <= 2*checkpointReserve:
+					reason = "checkpoint saved; insufficient time for work and a checkpoint"
+				case compactions >= 2:
+					reason = "checkpoint saved; context recovery limit (2 compactions)"
 				}
 				fail("limit_reached", fmt.Errorf("%s", reason))
 				return

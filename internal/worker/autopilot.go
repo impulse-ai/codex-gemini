@@ -105,9 +105,10 @@ func promptEstimate(h []*genai.Content, c *genai.GenerateContentConfig, lastProm
 	estimate := int64((len(b)+2)/3 + 256)
 	if lastPrompt > 0 && lastBytes > 0 {
 		scaled := lastPrompt * int64(len(b)) / int64(lastBytes) * 12 / 10
-		if scaled > estimate {
-			estimate = scaled
-		}
+		// Serialized SDK metadata is not billed as prompt text verbatim. Once
+		// provider counts are available, calibrate downward as well as upward,
+		// retaining a size floor and 20% headroom for changed content.
+		estimate = max(int64((len(b)+5)/6+256), scaled+256)
 	}
 	return estimate
 }

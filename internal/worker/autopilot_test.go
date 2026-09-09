@@ -237,6 +237,7 @@ func TestBudgetForecastReservesCheckpointInsteadOfAnotherRead(t *testing.T) {
 		if calls.Add(1) == 1 {
 			r := listResponse()
 			r.UsageMetadata.TotalTokenCount = 15000
+			r.UsageMetadata.PromptTokenCount = 3500
 			return r, nil
 		}
 		if c.ResponseMIMEType != "application/json" || len(c.Tools) != 0 {

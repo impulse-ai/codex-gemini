@@ -262,7 +262,7 @@ func run() error {
 		return err
 	}
 	defer conn.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.5.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.5.1"}, nil)
 	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
 	if err != nil {
 		return err

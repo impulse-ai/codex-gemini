@@ -130,7 +130,7 @@ func cancelCLIJobs(state string, jobs []worker.Job) {
 		return
 	}
 	defer conn.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cancel", Version: "0.5.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cancel", Version: "0.5.1"}, nil)
 	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
 	if err != nil {
 		return
