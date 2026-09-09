@@ -32,7 +32,7 @@ func TestMultipleClientsShareWorkAndDisconnectSafely(t *testing.T) {
 	defer cancel()
 	state := t.TempDir()
 	g := &blockedGenerator{entered: make(chan struct{}, 2), release: make(chan struct{})}
-	manager, e := worker.New(ctx, worker.Config{StateDir: state, Concurrency: 2, MaxSteps: 2, MaxTokens: 1000, MaxOutput: 100, Timeout: time.Minute, Thinking: "low"}, g)
+	manager, e := worker.New(ctx, worker.Config{StateDir: state, Concurrency: 2, MaxSteps: 2, MaxTokens: 100000, MaxOutput: 100, Timeout: time.Minute, Thinking: "low"}, g)
 	if e != nil {
 		t.Fatal(e)
 	}

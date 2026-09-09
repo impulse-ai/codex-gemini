@@ -373,6 +373,16 @@ func (m *Manager) Handoff(in HandoffInput) (Job, error) {
 func (m *Manager) workerCall(jobID, name string, args map[string]any, scopes []string) (any, error) {
 	get := func(k string) string { v, _ := args[k].(string); return v }
 	switch name {
+	case "report_checkpoint":
+		var c Checkpoint
+		b, err := json.Marshal(args)
+		if err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(b, &c); err != nil {
+			return nil, err
+		}
+		return m.checkpoint(jobID, c)
 	case "list_peers":
 		return m.Peers(), nil
 	case "send_message":

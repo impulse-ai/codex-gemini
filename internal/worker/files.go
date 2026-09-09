@@ -138,17 +138,12 @@ func (f *Files) call(name string, args map[string]any, scopes []string) (any, er
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"content": string(b), "sha256": digest(b)}, nil
-	case "write_file":
+		return readPage(b, args)
+	case "search_files":
+		return f.search(p, str("query"))
+	case "write_file", "edit_file":
 		if !owns(scopes, p) {
 			return nil, fmt.Errorf("write denied: path is outside assigned write_paths")
-		}
-		content, ok := args["content"].(string)
-		if !ok {
-			return nil, fmt.Errorf("content must be a string")
-		}
-		if len(content) > maxFile {
-			return nil, fmt.Errorf("content too large")
 		}
 		old, err := f.read(p)
 		expected := str("expected_sha256")
@@ -160,6 +155,25 @@ func (f *Files) call(name string, args map[string]any, scopes []string) (any, er
 			return nil, err
 		} else if expected != digest(old) {
 			return nil, fmt.Errorf("file changed; read it again before writing")
+		}
+		content, ok := args["content"].(string)
+		if name == "edit_file" {
+			if err != nil {
+				return nil, fmt.Errorf("edit_file requires an existing file")
+			}
+			before := str("old_text")
+			after, valid := args["new_text"].(string)
+			if !valid || before == "" || strings.Count(string(old), before) != 1 {
+				return nil, fmt.Errorf("old_text must match exactly once and new_text must be a string")
+			}
+			content = strings.Replace(string(old), before, after, 1)
+			ok = true
+		}
+		if !ok {
+			return nil, fmt.Errorf("content must be a string")
+		}
+		if len(content) > maxFile {
+			return nil, fmt.Errorf("content too large")
 		}
 		if err = f.root.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			return nil, err

@@ -26,7 +26,7 @@ func response(parts ...*genai.Part) *genai.GenerateContentResponse {
 	return &genai.GenerateContentResponse{Candidates: []*genai.Candidate{{Content: &genai.Content{Role: "model", Parts: parts}, FinishReason: genai.FinishReasonStop}}, UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: 10, CandidatesTokenCount: 5, TotalTokenCount: 15}}
 }
 func testConfig(dir string) Config {
-	return Config{Workspace: dir, Concurrency: 30, MaxSteps: 5, MaxTokens: 10000, MaxOutput: 1024, Timeout: time.Minute, Thinking: "low"}
+	return Config{Workspace: dir, Concurrency: 30, MaxSteps: 5, MaxTokens: 100000, MaxOutput: 1024, Timeout: time.Minute, Thinking: "low"}
 }
 func newManager(t *testing.T, cfg Config, g Generator) *Manager {
 	t.Helper()

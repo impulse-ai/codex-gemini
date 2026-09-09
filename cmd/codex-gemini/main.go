@@ -124,6 +124,8 @@ func run() error {
 	prompt := flags.String("prompt", "", "Assignment for run; if omitted read stdin")
 	contextIDs := flags.String("context-ids", "", "Comma-separated context packet IDs for run")
 	label := flags.String("label", "", "Short peer-discovery role label for run")
+	autopilot := flags.Bool("autopilot", true, "Checkpoint and compact unfinished work within the original run budget")
+	focus := flags.String("focus-paths", "", "Comma-separated relative files/directories to prioritize for run")
 	write := flags.String("write-paths", "", "Comma-separated exclusive writable files/directories; empty means read-only")
 	input := flags.String("file", "", "JSON task array for batch; if omitted read stdin")
 	if err := flags.Parse(os.Args[2:]); err != nil {
@@ -135,6 +137,15 @@ func run() error {
 	if flags.NArg() != 0 {
 		return fmt.Errorf("unexpected positional arguments; put task text after -prompt")
 	}
+	budgetSet, autopilotSet := false, false
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "max-tokens" {
+			budgetSet = true
+		}
+		if f.Name == "autopilot" {
+			autopilotSet = true
+		}
+	})
 	if *rpm < 1 || *output < 1 || *output > 65536 {
 		return fmt.Errorf("rpm must be positive; max-output must be 1–65536")
 	}
@@ -192,6 +203,12 @@ func run() error {
 			*prompt = string(b)
 		}
 		t := worker.Task{Prompt: *prompt, Label: *label, Thinking: *thinking}
+		t.Autopilot = autopilot
+		if *focus != "" {
+			for _, p := range strings.Split(*focus, ",") {
+				t.FocusPaths = append(t.FocusPaths, strings.TrimSpace(p))
+			}
+		}
 		if *contextIDs != "" {
 			for _, id := range strings.Split(*contextIDs, ",") {
 				t.ContextIDs = append(t.ContextIDs, strings.TrimSpace(id))
@@ -228,6 +245,12 @@ func run() error {
 		return err
 	}
 	for i := range tasks {
+		if budgetSet && tasks[i].MaxTokens == 0 {
+			tasks[i].MaxTokens = *tokens
+		}
+		if autopilotSet && tasks[i].Autopilot == nil {
+			tasks[i].Autopilot = autopilot
+		}
 		if tasks[i].Workspace == "" {
 			tasks[i].Workspace = abs
 		}
@@ -237,7 +260,7 @@ func run() error {
 		return err
 	}
 	defer conn.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.3.0"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.4.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
 	if err != nil {
 		return err
