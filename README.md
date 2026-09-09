@@ -44,6 +44,17 @@ env_vars = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 
 The saved key works even when the desktop app does not inherit your shell environment.
 
+## Codex skill
+
+The repository includes [skill guidance](skills/impulseai-codex-gemini/SKILL.md) for economical delegation, advanced technical context transfer, peer coordination, and validation. Install it for your local Codex account from this repository:
+
+```sh
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+ln -s "$PWD/skills/impulseai-codex-gemini" "${CODEX_HOME:-$HOME/.codex}/skills/impulseai-codex-gemini"
+```
+
+If the destination already exists, inspect it before replacing it. Reload skills or start a new session, then invoke `$impulseai-codex-gemini`. The skill supports automatic discovery for relevant Gemini delegation requests. Its guidance complements the MCP server's own tool instructions.
+
 ## Delegate work
 
 Ask Codex: “Use Gemini workers to handle these independent changes. Assign disjoint files, inspect their results, then run the tests.”
