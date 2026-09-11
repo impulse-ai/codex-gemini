@@ -114,6 +114,7 @@ func run() error {
 	}
 	stateDir := flags.String("state-dir", defaultState, "Shared service state directory (all clients must use the same value)")
 	embeddingModel := flags.String("embedding-model", "gemini-embedding-001", "Embedding model for shared memory, or off for local keyword-only retrieval")
+	intent := flags.String("intent", "", "Task intent: investigation, implementation, or review")
 	memoryQuery := flags.String("memory-query", "", "Targeted shared-memory retrieval query for run")
 	model := flags.String("model", "gemini-3.8-flash", "Exact Google model ID (no fallback)")
 	parallel := flags.Int("concurrency", 30, "Maximum simultaneous agents, 1–30")
@@ -204,7 +205,7 @@ func run() error {
 			}
 			*prompt = string(b)
 		}
-		t := worker.Task{MemoryQuery: *memoryQuery, Prompt: *prompt, Label: *label, Thinking: *thinking}
+		t := worker.Task{Intent: *intent, MemoryQuery: *memoryQuery, Prompt: *prompt, Label: *label, Thinking: *thinking}
 		t.Autopilot = autopilot
 		if *focus != "" {
 			for _, p := range strings.Split(*focus, ",") {
@@ -262,7 +263,7 @@ func run() error {
 		return err
 	}
 	defer conn.Close()
-	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.5.1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "codex-gemini-cli", Version: "0.6.0"}, nil)
 	session, err := client.Connect(ctx, &mcp.IOTransport{Reader: conn, Writer: conn}, nil)
 	if err != nil {
 		return err

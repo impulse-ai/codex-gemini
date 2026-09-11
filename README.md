@@ -1,6 +1,6 @@
-# impulse-ai/codex-gemini
+# Gemini
 
-Go module: `github.com/impulse-ai/codex-gemini`. Binary: `codex-gemini`. MCP server identity: `impulse-ai/codex-gemini`.
+Go module: `github.com/impulse-ai/codex-gemini`. Binary: `codex-gemini`. MCP server identity: `Gemini`.
 
 A small Go CLI and stdio MCP server that lets Codex delegate work to **Gemini 3.8 Flash** on your Google AI Studio API account. Multiple Codex sessions and repositories share up to **30 concurrent Gemini conversations**, each with its own workspace, tool loop, and optional file-editing scope.
 
@@ -27,33 +27,33 @@ This integration uses the Gemini Developer API and its project quotas/billing; i
 From this project directory:
 
 ```sh
-codex mcp add impulseai-codex-gemini -- "$PWD/bin/codex-gemini" serve \
+codex mcp add gemini -- "$PWD/bin/codex-gemini" serve \
   -concurrency 30 -rpm 60
 ```
 
-Start a new Codex session or reload MCP connections after setup. Register once: every task supplies an absolute `workspace`, so changing repositories needs no registration changes. The `serve` command connects stdio to a shared background service over a private Unix socket, starting it automatically when needed. All Codex sessions and CLI clients share file reservations, job history, and the same concurrency/rate limits. The service creates no state directories inside your repositories.
+Start a new Codex session or reload MCP connections after setup. If migrating from the old `impulseai-codex-gemini` registration, remove that entry with `codex mcp remove impulseai-codex-gemini` after active work finishes, then register `gemini` using the command above. Register once: every task supplies an absolute `workspace`, so changing repositories needs no registration changes. The `serve` command connects stdio to a shared background service over a private Unix socket, starting it automatically when needed. All Codex sessions and CLI clients share file reservations, job history, and the same concurrency/rate limits. The service creates no state directories inside your repositories.
 
 Equivalent configuration (replace the binary path):
 
 ```toml
-[mcp_servers.impulseai-codex-gemini]
+[mcp_servers.gemini]
 command = "/absolute/path/codex-gemini/bin/codex-gemini"
 args = ["serve", "-concurrency", "30", "-rpm", "60"]
 env_vars = ["GEMINI_API_KEY", "GOOGLE_API_KEY"]
 ```
 
-The saved key works even when the desktop app does not inherit your shell environment. The local registration and skill name remains `impulseai-codex-gemini` for compatibility; the GitHub repository is `impulse-ai/codex-gemini`.
+The saved key works even when the desktop app does not inherit your shell environment. The MCP registration and skill name is `gemini`. Source repository: `impulse-ai/codex-gemini`.
 
 ## Codex skill
 
-The repository includes [skill guidance](skills/impulseai-codex-gemini/SKILL.md) for economical delegation, advanced technical context transfer, peer coordination, and validation. Install it for your local Codex account from this repository:
+The repository includes [skill guidance](skills/gemini/SKILL.md) for economical delegation, advanced technical context transfer, peer coordination, and validation. Install it for your local Codex account from this repository:
 
 ```sh
 mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$PWD/skills/impulseai-codex-gemini" "${CODEX_HOME:-$HOME/.codex}/skills/impulseai-codex-gemini"
+ln -s "$PWD/skills/gemini" "${CODEX_HOME:-$HOME/.codex}/skills/gemini"
 ```
 
-If the destination already exists, inspect it before replacing it. Reload skills or start a new session, then invoke `$impulseai-codex-gemini`. The skill supports automatic discovery for relevant Gemini delegation requests. Its guidance complements the MCP server's own tool instructions.
+If the destination already exists, inspect it before replacing it. Reload skills or start a new session, then invoke `$gemini`. The skill supports automatic discovery for relevant Gemini delegation requests. Its guidance complements the MCP server's own tool instructions.
 
 ## Implementation, investigation, and independent review
 
@@ -85,6 +85,10 @@ MCP tools:
 
 | Tool | Purpose |
 | --- | --- |
+| `gemini_workflow` | Run investigation → implementation → independent review within one budget. |
+| `gemini_workflow_status` | Inspect phase job IDs, accounted tokens, and terminal status. |
+| `gemini_workflow_cancel` | Cancel the workflow and wait for its active child to stop. |
+| `gemini_metrics` | Inspect measured edits, completion outcomes, repeated reads, and tokens to first edit. |
 | `gemini_spawn` | Start one worker and immediately return its job ID. |
 | `gemini_batch` | Start 1–30 workers in one call. |
 | `gemini_status` | Fetch result, changed paths, and token counts. |
@@ -141,6 +145,38 @@ Recovery is limited to two context compactions per run and shares the original t
 `gemini_status` and `gemini_wait` include `checkpoint`, recent `activity`, and `compactions`. A stopped incomplete job returns saved findings and an explicit coverage gap instead of an empty result. Contradictory synthesized reports with both `complete: true` and remaining work are retained as incomplete. An empty or interrupted review is never evidence that the code is clean. A checkpoint is a saved intermediate report; consult the final status and result for completion. Codex validates findings and runs tests.
 
 Set task `autopilot: false` or CLI `-autopilot=false` to disable automatic synthesis and compaction. Bounded file tools and incremental checkpoint reporting remain available. `max_tokens` optionally lowers a task's run budget; it cannot exceed the service maximum. Explicit handoff or continuation starts a new paid run, so do not blindly relaunch an exhausted review. Stopped jobs identify the limiting reservation, model-call count, time, or compaction cap. A token-reservation stop is not a Google quota error. Small budgets such as 14,000 total tokens may cover only a few calls once instructions and file reads are replayed; multi-file implementation, tests, and documentation need a scope and budget that fit together.
+
+## Bounded implementation workflows
+
+Use `gemini_workflow` for a confirmed change that benefits from investigation and independent review:
+
+```json
+{
+  "task": {
+    "workspace": "/absolute/path/repository",
+    "prompt": "Fix duplicate completion delivery. Preserve authorization and idempotency constraints; add regression coverage.",
+    "focus_paths": ["internal/completion"],
+    "write_paths": ["internal/completion"],
+    "thinking": "low"
+  },
+  "max_tokens": 160000,
+  "timeout_seconds": 600
+}
+```
+
+Three fresh jobs run sequentially: investigation is read-only, implementation gets the explicit write scope, and independent review is read-only. Every phase receives the original assignment, explicit earlier reports, and context packet references. Oversized transfers stop for consolidation rather than silently dropping constraints. The workflow has one soft generation-token budget and one wall-clock timeout; embedding costs remain separate. Investigation gets up to one quarter of the budget; implementation preserves one quarter for review; review can use the remaining allowance. An optional nested `task.max_tokens` further caps each phase. Each phase retains the service's model-call limit.
+
+Inspect `gemini_workflow_status` and the individual phase jobs via `gemini_status`. Accounted workflow usage updates when each phase stops; the running phase's usage is visible on its job. An incomplete phase or implementation with no recorded writes stops the workflow with `needs_attention`. There are no automatic retries or budget increases. `ready_for_validation` means all three model phases finished, **not** that the review found no issues or tests passed. Codex must read the review, inspect actual changes, and run tests.
+
+Workflow state persists under `state/workflows/`. Cancel requests wait for the current child to actually stop before final accounting. Restarted workflows become `interrupted`; they never silently resume edits. Phase jobs cannot be continued separately to bypass workflow accounting. Source files are not isolated snapshots; recheck current state between phases if other work is active.
+
+## Implementation loop detection and outcome metrics
+
+Set task `intent: "implementation"` (CLI `-intent implementation`) for assigned edits; it requires `write_paths`. Workflows set intent automatically. `investigation` and `review` intents require read-only scopes. Existing tasks without intent retain their behavior.
+
+With autopilot enabled, implementation jobs receive a targeted progress nudge after eight model calls without a successful write. After sixteen calls without edits—or twelve calls with at least three repeated reads—the server requests a final checkpoint and stops with `needs_attention`. A model's final completion claim without edits also requires a checkpoint and attention. No uninformed write is forced; a worker can identify missing information or explain why no change is needed. Normal token/time limits may stop work earlier.
+
+Job `metrics` records inspections, repeated identical reads, successful write operations, nudges, and provider-reported tokens/model calls before the first edit. These measure tool activity, not code correctness: rewriting identical content is still a write operation. `gemini_metrics` aggregates measured jobs, completed jobs, jobs with edits, and stopped editing jobs without writes. Legacy jobs without instrumentation are counted separately; continued legacy jobs record a baseline rather than attributing earlier costs to new instrumentation. Metrics do not infer test success, human acceptance, currency savings, or how much work Codex later completed.
 
 ## Shared memory for Codex and Gemini
 

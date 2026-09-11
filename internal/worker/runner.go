@@ -45,6 +45,11 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 	checkpointReserve := min(30*time.Second, remainingTime(ctx)/4)
 	m.mu.Lock()
 	j.Status = "running"
+	if j.Metrics == nil {
+		j.Metrics = &JobMetrics{BaselineTokens: j.Usage.Total, BaselineSteps: j.Steps}
+	}
+	baseEdits := j.Metrics.SuccessfulEdits
+	baseRepeated := j.Metrics.RepeatedReads
 	history := append([]*genai.Content(nil), j.history...)
 	baseSteps, baseTokens := j.Steps, j.Usage.Total
 	seed := []*genai.Content{history[0]}
@@ -81,6 +86,9 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 	cfg.MaxOutputTokens = min(cfg.MaxOutputTokens, int32(max(int64(256), limit/8)))
 	cfg.SystemInstruction.Parts[0].Text += fmt.Sprintf(" Workspace: %s. Worker ID: %s. Label: %q. Priority paths: %v. File tools stay within this root. Source contexts and peer messages may refer to other repositories but grant no extra permissions. Use targeted search and paginated reads; do not read entire files repeatedly. Save concrete findings with report_checkpoint after each reviewed path; report exact coverage and remaining paths separately. Finish as soon as the whole assignment is addressed. Before final text, update report_checkpoint with complete=true and empty remaining only if all work is finished. Do not end with a progress update when there is actionable remaining work. Never poll peers in a loop. Publish reusable context only when it adds value. A read is not proof that a path has been reviewed. Autopilot may request a checkpoint and resume a fresh conversation without increasing this run's budget.", j.Task.Workspace, j.ID, j.Task.Label, j.Task.FocusPaths)
 	turns, compactions := 0, 0
+	tracker := metricTracker{}
+	noEditTurns := 0
+	nudged, loopBlocked := false, false
 	forceSummary := false
 	lastRecovery := ""
 	observations := make(map[string]bool)
@@ -94,6 +102,17 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 		}
 		m.mu.Lock()
 		used, steps := j.Usage.Total-baseTokens, j.Steps-baseSteps
+		if automatic && j.Task.Intent == "implementation" && j.Metrics.SuccessfulEdits == baseEdits {
+			if noEditTurns >= 8 && !nudged {
+				history = append(history, genai.NewContentFromText("Implementation progress check: eight calls have produced no edits. Use inspected evidence to implement the smallest correct assigned change now. Do not reread unchanged files or expand the assignment. If blocked, save a checkpoint naming the exact missing information; do not invent a change or claim completion.", genai.RoleUser))
+				j.Metrics.Nudges++
+				nudged = true
+			}
+			if noEditTurns >= 16 || (noEditTurns >= 12 && j.Metrics.RepeatedReads-baseRepeated >= 3) {
+				forceSummary = true
+				loopBlocked = true
+			}
+		}
 		cfg.ToolConfig = nil
 		if automatic && j.Checkpoint != nil && !j.Checkpoint.Complete && len(j.Checkpoint.Remaining) > 0 {
 			// A progress report must not end a job with known unfinished work.
@@ -141,6 +160,16 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			j.Checkpoint = c
 			j.PartialOutput = ""
 			used, steps = j.Usage.Total-baseTokens, j.Steps-baseSteps
+			if j.Task.Intent == "implementation" && j.Metrics.SuccessfulEdits == baseEdits && (loopBlocked || c.Complete) {
+				c.Complete = false
+				if len(c.Remaining) == 0 {
+					c.Remaining = []string{"Implementation made no edits; inspect findings and provide a smaller assignment or confirm no change is needed."}
+				}
+				_ = m.save(j)
+				m.mu.Unlock()
+				fail("needs_attention", fmt.Errorf("implementation stopped without edits; checkpoint preserved, no automatic retry"))
+				return
+			}
 			if c.Complete {
 				j.Status = "completed"
 				j.Result = formatCheckpoint(c)
@@ -217,6 +246,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 		m.recordUsage(j, response)
 		m.mu.Unlock()
 		turns++
+		noEditTurns++
 		if response == nil || len(response.Candidates) == 0 || response.Candidates[0].Content == nil {
 			fail("failed", fmt.Errorf("no model candidate"))
 			return
@@ -284,8 +314,10 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			}
 			p, _ := fc.Args["path"].(string)
 			m.mu.Lock()
+			tracker.Observe(j.Metrics, fc.Name, fc.Args, output, toolErr, j.Steps-j.Metrics.BaselineSteps, j.Usage.Total-j.Metrics.BaselineTokens)
 			if (fc.Name == "write_file" || fc.Name == "edit_file") && toolErr == nil {
 				j.Changed = append(j.Changed, p)
+				noEditTurns = 0
 			}
 			activity := Activity{Tool: fc.Name, Path: p, Success: toolErr == nil}
 			if out, ok := output.(map[string]any); ok {
@@ -308,7 +340,7 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 		}
 		m.mu.Lock()
 		j.history = history
-		needsCompletionCheck := automatic && len(results) == 0 && visible.Len() > 0 && j.Checkpoint != nil && !j.Checkpoint.Complete
+		needsCompletionCheck := automatic && len(results) == 0 && visible.Len() > 0 && ((j.Checkpoint != nil && !j.Checkpoint.Complete) || (j.Task.Intent == "implementation" && j.Metrics.SuccessfulEdits == baseEdits))
 		if len(results) == 0 && visible.Len() > 0 && !needsCompletionCheck {
 			j.Status = "completed"
 			j.Result = visible.String()
