@@ -38,6 +38,20 @@ API keys are saved with owner-only permissions outside the repository. `GEMINI_A
 - **Cost & Google API quotas:** Workers consume tokens on your Google AI Studio API quota. Worker concurrency and request rates (`-rpm`) are bounded locally to prevent bursts, but high concurrency does not increase your Google account quota.
 - **Shared memory & context:** Workers and Codex share a local SQLite vector memory (`search_memory` / `gemini_search_memory`) and immutable context packets (`publish_context` / `read_context`) to hand off findings across phases or repositories.
 
+## Cost comparison
+
+Checked **September 11, 2026**. USD per million tokens, standard API processing, OpenAI short-context rates:
+
+| Model | Input | Cached input | Output | Example: 100k input + 10k output |
+| --- | ---: | ---: | ---: | ---: |
+| GPT-5.6 Luna | $0.20 | $0.02 | $1.20 | $0.0320 |
+| **Gemini 3.8 Flash** | **$0.75** | **$0.075** | **$3.75** | **$0.1125** |
+| GPT-5.6 Terra | $2.00 | $0.20 | $12.00 | $0.3200 |
+
+Luna and Terra are the lower-cost current GPT-5.6 choices in Codex. At the example's identical uncached token counts, Gemini costs **3.52× Luna** and **64.8% less than Terra**. This compares token prices, not coding quality or cost per completed task. Sources: [OpenAI API pricing](https://developers.openai.com/api/docs/pricing), [Codex models](https://learn.chatgpt.com/docs/models), [Google API pricing](https://ai.google.dev/gemini-api/docs/pricing#gemini-3.8-flash).
+
+Gemini's prices above expire December 31, 2026; Google lists $1.50 input / $7.50 output starting January 1, 2027. Codex subscriptions use included allowances and credits, so API dollar comparisons do not directly measure subscription savings. See [billing assumptions and Codex credit rates](docs/costs.md).
+
 ## Everyday Delegation Examples
 
 Delegate natural-language tasks to Gemini through Codex:
