@@ -29,7 +29,7 @@ Packets are immutable and limited to 32 KiB; tasks can load eight. Favor file re
 
 ## Choose task intent and workflows
 
-For edits, set `intent: "implementation"` and explicit `write_paths`; investigation and review intents must be read-only. With autopilot, implementation jobs are nudged after eight no-edit calls and checkpointed to `needs_attention` after prolonged inspection. Treat this as a request to use the saved evidence for a smaller assignment or resolve a blocker, never a reason to force a speculative edit.
+For edits, set `intent: "implementation"` and explicit `write_paths`; investigation and review intents must be read-only. With autopilot, implementation jobs are nudged after eight consecutive no-edit calls and checkpointed to `needs_attention` after prolonged inspection, including stalls after an initial edit. A successful write resets the stall window; partial edits remain for inspection. Treat this as a request to use the saved evidence for a smaller assignment or resolve a blocker, never a reason to force a speculative edit.
 
 Use `gemini_workflow` with a task, overall `max_tokens`, and `timeout_seconds` when a change warrants sequential investigation, implementation, and independent review. Only implementation receives writes; reports and original constraints transfer between phases. Workflow token/time limits cover all phases, with no automatic retries. Use `gemini_workflow_status`, inspect each phase job, and use `gemini_workflow_cancel` to cancel. A final `ready_for_validation` requires Codex to inspect the review and run checks; it does not mean no issues were found. Interrupted workflows require inspection before new work.
 

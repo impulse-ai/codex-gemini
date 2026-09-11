@@ -102,9 +102,9 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 		}
 		m.mu.Lock()
 		used, steps := j.Usage.Total-baseTokens, j.Steps-baseSteps
-		if automatic && j.Task.Intent == "implementation" && j.Metrics.SuccessfulEdits == baseEdits {
+		if automatic && j.Task.Intent == "implementation" {
 			if noEditTurns >= 8 && !nudged {
-				history = append(history, genai.NewContentFromText("Implementation progress check: eight calls have produced no edits. Use inspected evidence to implement the smallest correct assigned change now. Do not reread unchanged files or expand the assignment. If blocked, save a checkpoint naming the exact missing information; do not invent a change or claim completion.", genai.RoleUser))
+				history = append(history, genai.NewContentFromText("Implementation progress check: eight consecutive calls have produced no new edits. Use inspected evidence to implement the smallest correct assigned change now. Do not reread unchanged files or expand the assignment. If blocked, save a checkpoint naming the exact missing information; do not invent a change or claim completion.", genai.RoleUser))
 				j.Metrics.Nudges++
 				nudged = true
 			}
@@ -160,14 +160,23 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			j.Checkpoint = c
 			j.PartialOutput = ""
 			used, steps = j.Usage.Total-baseTokens, j.Steps-baseSteps
-			if j.Task.Intent == "implementation" && j.Metrics.SuccessfulEdits == baseEdits && (loopBlocked || c.Complete) {
+			if j.Task.Intent == "implementation" && (loopBlocked || (j.Metrics.SuccessfulEdits == baseEdits && c.Complete)) {
+				noEdits := j.Metrics.SuccessfulEdits == baseEdits
 				c.Complete = false
 				if len(c.Remaining) == 0 {
-					c.Remaining = []string{"Implementation made no edits; inspect findings and provide a smaller assignment or confirm no change is needed."}
+					if noEdits {
+						c.Remaining = []string{"Implementation made no edits; inspect findings and provide a smaller assignment or confirm no change is needed."}
+					} else {
+						c.Remaining = []string{"Implementation stalled between edits; inspect findings and provide guidance or a smaller assignment."}
+					}
 				}
 				_ = m.save(j)
 				m.mu.Unlock()
-				fail("needs_attention", fmt.Errorf("implementation stopped without edits; checkpoint preserved, no automatic retry"))
+				if noEdits {
+					fail("needs_attention", fmt.Errorf("implementation stopped without edits; checkpoint preserved, no automatic retry"))
+				} else {
+					fail("needs_attention", fmt.Errorf("implementation stalled between edits; checkpoint preserved, no automatic retry"))
+				}
 				return
 			}
 			if c.Complete {
@@ -318,6 +327,8 @@ func (m *Manager) run(ctx context.Context, j *Job) {
 			if (fc.Name == "write_file" || fc.Name == "edit_file") && toolErr == nil {
 				j.Changed = append(j.Changed, p)
 				noEditTurns = 0
+				nudged = false
+				baseRepeated = j.Metrics.RepeatedReads
 			}
 			activity := Activity{Tool: fc.Name, Path: p, Success: toolErr == nil}
 			if out, ok := output.(map[string]any); ok {
