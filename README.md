@@ -49,6 +49,8 @@ Delegate natural-language tasks to Gemini through Codex:
 - **Independent Review:**
   > "Assign a read-only Gemini worker to independently review the diffs in `internal/auth` against our concurrency invariants before I run integration tests."
 
+For larger changes, ask Codex to use `gemini_plan` to propose small tasks with file ownership, acceptance checks, and dependency waves. Codex checks `gemini_plan_status`, then dispatches the returned tasks. Planning does not start edits.
+
 For structured multi-stage tasks, the `gemini_workflow` tool coordinates: **investigation (read-only) → implementation (scoped writes) → independent review (read-only)** under a single token and time budget. A `ready_for_validation` result still requires Codex to inspect the review and run tests. See [Bounded implementation workflows](docs/reference.md#bounded-implementation-workflows).
 
 ## CLI Example

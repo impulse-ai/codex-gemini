@@ -52,6 +52,7 @@ type Usage struct {
 	Total    int64 `json:"total"`
 }
 type Job struct {
+	PlanSpec      *PlanInput  `json:"plan_spec,omitempty"`
 	WorkflowID    string      `json:"workflow_id,omitempty"`
 	Metrics       *JobMetrics `json:"metrics,omitempty"`
 	MemoryError   string      `json:"memory_error,omitempty"`
@@ -243,6 +244,7 @@ func (m *Manager) save(j *Job) error {
 }
 func snapshot(j *Job, history bool) Job {
 	r := *j
+	r.PlanSpec = nil // Planner constraints stay in the archive, not repeated status responses.
 	if j.Metrics != nil {
 		v := *j.Metrics
 		r.Metrics = &v
@@ -536,6 +538,9 @@ func (m *Manager) Continue(id, prompt string) (Job, error) {
 	case <-j.done:
 	default:
 		return Job{}, fmt.Errorf("job is finishing; wait before continuing")
+	}
+	if j.PlanSpec != nil {
+		return Job{}, fmt.Errorf("planner jobs cannot be continued; create a new plan with explicit constraints")
 	}
 	if j.WorkflowID != "" {
 		return Job{}, fmt.Errorf("workflow phase jobs cannot continue; start a separate task")

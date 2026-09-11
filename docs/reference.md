@@ -8,6 +8,7 @@
 - [Implementation, investigation, and independent review](#implementation-investigation-and-independent-review)
 - [Delegate work](#delegate-work)
 - [Autopilot and useful partial results](#autopilot-and-useful-partial-results)
+- [Task decomposition](#task-decomposition)
 - [Bounded implementation workflows](#bounded-implementation-workflows)
 - [Implementation loop detection and outcome metrics](#implementation-loop-detection-and-outcome-metrics)
 - [Shared memory for Codex and Gemini](#shared-memory-for-codex-and-gemini)
@@ -104,6 +105,8 @@ MCP tools:
 
 | Tool | Purpose |
 | --- | --- |
+| `gemini_plan` | Start a read-only decomposition job with explicit maximum write scope. |
+| `gemini_plan_status` | Validate steps and dependencies; return scoped tasks and execution waves. |
 | `gemini_workflow` | Run investigation → implementation → independent review within one budget. |
 | `gemini_workflow_status` | Inspect phase job IDs, accounted tokens, and terminal status. |
 | `gemini_workflow_cancel` | Cancel the workflow and wait for its active child to stop. |
@@ -164,6 +167,34 @@ Recovery is limited to two context compactions per run and shares the original t
 `gemini_status` and `gemini_wait` include `checkpoint`, recent `activity`, and `compactions`. A stopped incomplete job returns saved findings and an explicit coverage gap instead of an empty result. Contradictory synthesized reports with both `complete: true` and remaining work are retained as incomplete. An empty or interrupted review is never evidence that the code is clean. A checkpoint is a saved intermediate report; consult the final status and result for completion. Codex validates findings and runs tests.
 
 Set task `autopilot: false` or CLI `-autopilot=false` to disable automatic synthesis and compaction. Bounded file tools and incremental checkpoint reporting remain available. `max_tokens` optionally lowers a task's run budget; it cannot exceed the service maximum. Explicit handoff or continuation starts a new paid run, so do not blindly relaunch an exhausted review. Stopped jobs identify the limiting reservation, model-call count, time, or compaction cap. A token-reservation stop is not a Google quota error. Small budgets such as 14,000 total tokens may cover only a few calls once instructions and file reads are replayed; multi-file implementation, tests, and documentation need a scope and budget that fit together.
+
+## Task decomposition
+
+`gemini_plan` starts a read-only planner for a larger implementation goal:
+
+```json
+{
+  "task": {
+    "workspace": "/absolute/path/repository",
+    "prompt": "Add resumable uploads. Preserve authorization and existing API compatibility; include regression coverage.",
+    "write_paths": ["internal/uploads", "web/uploads"],
+    "focus_paths": ["internal/uploads", "web/uploads"],
+    "max_tokens": 100000,
+    "thinking": "low"
+  },
+  "max_tasks": 6
+}
+```
+
+Here `write_paths` bounds the scope the planner may propose; the planner itself receives no write permissions. `max_tasks` defaults to six and accepts 1–12. The task's `max_tokens` caps planning inference only. Each proposed implementation has its own positive `max_tokens`, limited by the service maximum; execution is separately paid and has no aggregate plan budget yet.
+
+Use the returned job ID with `gemini_wait`, then `gemini_plan_status`. Only `plan_ready` includes a structurally validated plan. Failed, interrupted, incomplete, or malformed planner output returns `needs_attention`, without executable tasks. `gemini_status` retains the original result and findings for diagnosis. Cancel planning with `gemini_cancel`; create a new plan to change constraints rather than continuing the planner job.
+
+Each step includes an ID, assignment, write paths, dependencies, acceptance criteria, and a validated `task` ready for `gemini_spawn` or `gemini_batch`. That task preserves the original objective, context IDs, workspace, and settings. `waves` lists step IDs whose prerequisites appear in earlier waves. Within a wave, write scopes are disjoint. Shared files require a transitive dependency; cycles, missing dependencies, invalid paths, and scope expansion are rejected.
+
+Codex inspects the plan, dispatches the selected wave's `task` objects, and checks actual completion before advancing. Transfer predecessor findings using context packets or `gemini_handoff`; the plan does not copy future results automatically. Stop on failed prerequisites and replan as needed. Workers still cannot run shell commands; Codex executes acceptance checks and independently reviews changes. `plan_ready` establishes structural validity, not correctness, permission to broaden scope, or test success.
+
+Plans use the existing persisted job archive. Status revalidates paths against the current workspace; it does not reserve files, create isolated snapshots, launch implementation jobs, or automatically retry. Reload MCP connections after deploying the new server tools.
 
 ## Bounded implementation workflows
 
