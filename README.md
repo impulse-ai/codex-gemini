@@ -52,6 +52,18 @@ Luna and Terra are the lower-cost current GPT-5.6 choices in Codex. At the examp
 
 Gemini's prices above expire December 31, 2026; Google lists $1.50 input / $7.50 output starting January 1, 2027. Codex subscriptions use included allowances and credits, so API dollar comparisons do not directly measure subscription savings. See [billing assumptions and Codex credit rates](docs/costs.md).
 
+### Coding performance
+
+Published scores checked September 11, 2026 (higher is better):
+
+| Model | DeepSWE v1.1 | Terminal-Bench 2.1 |
+| --- | ---: | ---: |
+| GPT-5.6 Luna | 67.2% | 84.7% |
+| **Gemini 3.8 Flash** | **73.7%** | **89.4%** |
+| GPT-5.6 Terra | 69.6% | 87.4% |
+
+Sources: [Google model card](https://deepmind.google/models/model-cards/gemini-3-8-flash/), [OpenAI GPT-5.6 evaluations](https://openai.com/index/gpt-5-6/). These results plus lower token prices make Gemini a promising value alternative to Terra, but do not establish better value than Luna. They are published benchmark results, not a controlled test of this integration. Gemini also trails Terra on Terminal-Bench 4.0 (19.1% vs 23.6%). See [performance-per-dollar assumptions](docs/costs.md#performance-per-dollar) before interpreting savings.
+
 ## Everyday Delegation Examples
 
 Delegate natural-language tasks to Gemini through Codex:
