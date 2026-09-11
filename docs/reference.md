@@ -24,6 +24,9 @@ Gemini workers do the delegated reasoning and editing. Codex supplies assignment
 
 ## Setup
 
+The recommended setup is now `go install github.com/impulse-ai/codex-gemini/cmd/codex-gemini@latest`, followed by `codex-gemini` (or build the binary below and run it without arguments). Go compilation/install alone does not execute setup. The first no-argument launch installs the embedded skill, registers the executable with Codex, and asks for an API key only when missing and an interactive terminal is available. `codex-gemini setup` repeats this process. The Codex CLI must be available on `PATH`. The manual registration and symlink instructions below remain alternatives. Setup accepts matching existing files (including identical symlinked skills) without rewriting them. If an older or customized skill differs, review it and move it aside before rerunning setup. A conflicting MCP registration is left untouched; inspect it with `codex mcp get gemini`, and use `codex mcp remove gemini` only if you intend to replace it. Moving the binary also requires registration to be updated. Setup never restarts the shared service.
+
+
 Requires Go 1.27 and macOS or Linux.
 
 ```sh

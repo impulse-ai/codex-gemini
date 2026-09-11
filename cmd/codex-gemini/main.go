@@ -97,9 +97,16 @@ func main() {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		return fmt.Errorf("usage: codex-gemini <serve|run|batch|doctor|auth|daemon|stop> [flags]; use <command> -h")
+		return setup(nil)
 	}
 	command := os.Args[1]
+	if command == "setup" {
+		return setup(os.Args[2:])
+	}
+	if command == "-h" || command == "--help" || command == "help" {
+		fmt.Fprintln(os.Stdout, "Usage: codex-gemini [setup|serve|run|batch|doctor|auth|daemon|stop] [flags]\nRun without arguments to install the skill, register with Codex, and configure authentication.\nUse <command> -h for flags.")
+		return nil
+	}
 	if command == "auth" {
 		return auth()
 	}

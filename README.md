@@ -6,37 +6,29 @@ For tool usage, configuration, and advanced topics, see the [reference](docs/ref
 
 ## Quickstart
 
-Requires Go 1.27 and macOS or Linux.
+Requires Go 1.27, the Codex CLI (`codex` on your `PATH`), and macOS or Linux.
 
-Clone, build, configure your API key, and check health:
+```sh
+go install github.com/impulse-ai/codex-gemini/cmd/codex-gemini@latest
+codex-gemini
+```
+
+If your Go binary directory isn't on `PATH`, run `"$(go env GOPATH)/bin/codex-gemini"` instead (or use your configured `GOBIN`). For a private repository, your Git credentials and Go private-module configuration must allow access.
+
+On its first launch without arguments, Gemini installs its bundled [Codex skill](skills/gemini/SKILL.md), registers the MCP server, and prompts for your [Google AI Studio API key](https://aistudio.google.com/api-keys) if needed. Start a new Codex session or reload MCP connections and skills, then ask Codex to use `$gemini`.
+
+Prefer building from a checkout?
 
 ```sh
 gh repo clone impulse-ai/codex-gemini
 cd codex-gemini
 go build -o bin/codex-gemini ./cmd/codex-gemini
-./bin/codex-gemini auth
-./bin/codex-gemini doctor
+./bin/codex-gemini
 ```
 
-Get an API key from [Google AI Studio](https://aistudio.google.com/api-keys). `auth` saves the key under your OS user configuration directory with mode `0600`. Environment variables `GEMINI_API_KEY` or `GOOGLE_API_KEY` take precedence if set. `doctor` checks authentication and model lookup; it does not test generation quota. Worker prompts and files read by workers are sent to Google.
+Setup works across repositories without re-registration. The skill is embedded in the binary, so the checkout isn't needed after installation. Run `codex-gemini setup` to repeat setup; existing custom configuration is preserved. Regular commands such as `serve`, `run`, and `doctor` do not trigger setup.
 
-## Connect to Codex
-
-Register the MCP server from this repository directory:
-
-```sh
-codex mcp add gemini -- "$PWD/bin/codex-gemini" serve \
-  -concurrency 30 -rpm 60
-```
-
-Install the optional [Codex skill](skills/gemini/SKILL.md) for delegation guidance you can invoke with `$gemini`:
-
-```sh
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-ln -s "$PWD/skills/gemini" "${CODEX_HOME:-$HOME/.codex}/skills/gemini"
-```
-
-If the skill destination already exists, inspect it before replacing it. Start a new Codex session or reload MCP connections and skills. You register the server once: every task passes an absolute `workspace`, so working in different repositories needs no re-registration.
+API keys are saved with owner-only permissions outside the repository. `GEMINI_API_KEY`, then `GOOGLE_API_KEY`, override the saved key. Noninteractive setup needs an existing key or an environment variable; it never waits for input. `codex-gemini doctor` checks authentication and model lookup, but not generation quota. Worker prompts and files read by workers are sent to Google.
 
 ## How Delegation Works
 
